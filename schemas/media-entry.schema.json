@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dalsoop/device-install-media-catalog/schemas/media-entry.schema.json",
+  "title": "Device Install Media Entry",
+  "type": "object",
+  "required": ["schema_version", "id", "group", "version", "destination", "menu_alias", "description_ko", "description_en", "boot_behavior", "profile_adapter", "source"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "group": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "version": { "type": "string", "minLength": 1 },
+    "architecture": { "type": "string", "minLength": 1 },
+    "destination": { "type": "string", "pattern": "^images/.+\\.iso$" },
+    "menu_alias": { "type": "string", "minLength": 1 },
+    "description_ko": { "type": "string", "minLength": 1 },
+    "description_en": { "type": "string", "minLength": 1 },
+    "boot_behavior": { "enum": ["interactive-installer", "live-environment"] },
+    "profile_adapter": { "const": "none" },
+    "source": {
+      "type": "object",
+      "required": ["kind", "filename", "url", "sha256"],
+      "properties": {
+        "kind": { "const": "locked-download" },
+        "filename": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "pattern": "^https://" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
+

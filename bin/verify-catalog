@@ -1,0 +1,106 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+default_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+repo_root=${DEVICE_MEDIA_CATALOG_ROOT:-$default_root}
+index=$repo_root/catalog/index.json
+
+fail() {
+    echo "device install media catalog: $*" >&2
+    exit 1
+}
+
+command -v jq >/dev/null 2>&1 || fail "jq is required"
+[ -r "$index" ] || fail "catalog/index.json is missing"
+
+jq -e '
+  def safe_id: type == "string" and test("^[a-z0-9][a-z0-9-]*$");
+  def safe_rel:
+    type == "string" and
+    test("^[A-Za-z0-9][A-Za-z0-9._+!/-]*$") and
+    (startswith("/") | not) and
+    (split("/") | all(. != "" and . != "." and . != ".."));
+  .schema_version == 1 and
+  .name == "Device Install Media Catalog" and
+  .repository == "https://github.com/dalsoop/device-install-media-catalog" and
+  (.bootloaders | type == "array" and length > 0) and
+  (.entries | type == "array" and length > 0) and
+  (all(.bootloaders[]; (.id | safe_id) and (.path | safe_rel) and (.path | startswith("catalog/bootloaders/")))) and
+  (all(.entries[]; (.id | safe_id) and (.path | safe_rel) and (.path | startswith("catalog/entries/")))) and
+  (([.bootloaders[].id] | length) == ([.bootloaders[].id] | unique | length)) and
+  (([.bootloaders[].path] | length) == ([.bootloaders[].path] | unique | length)) and
+  (([.entries[].id] | length) == ([.entries[].id] | unique | length)) and
+  (([.entries[].path] | length) == ([.entries[].path] | unique | length))
+' "$index" >/dev/null || fail "catalog index contract is invalid"
+
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+
+jq -r '.entries[].path' "$index" | LC_ALL=C sort > "$temporary/indexed-entries"
+find "$repo_root/catalog/entries" -type f -name '*.json' |
+    sed "s|^$repo_root/||" | LC_ALL=C sort > "$temporary/actual-entries"
+cmp -s "$temporary/indexed-entries" "$temporary/actual-entries" ||
+    fail "catalog entries and index references differ"
+
+jq -r '.bootloaders[].path' "$index" | LC_ALL=C sort > "$temporary/indexed-bootloaders"
+find "$repo_root/catalog/bootloaders" -type f -name '*.json' |
+    sed "s|^$repo_root/||" | LC_ALL=C sort > "$temporary/actual-bootloaders"
+cmp -s "$temporary/indexed-bootloaders" "$temporary/actual-bootloaders" ||
+    fail "bootloaders and index references differ"
+
+tab=$(printf '\t')
+jq -r '.entries[] | [.id, .path] | @tsv' "$index" |
+while IFS="$tab" read -r expected_id path; do
+    file=$repo_root/$path
+    [ -r "$file" ] || fail "entry is not readable: $path"
+    jq -e --arg expected_id "$expected_id" '
+      def safe_id: type == "string" and test("^[a-z0-9][a-z0-9-]*$");
+      def safe_rel:
+        type == "string" and
+        test("^[A-Za-z0-9][A-Za-z0-9._+!/-]*$") and
+        (startswith("/") | not) and
+        (split("/") | all(. != "" and . != "." and . != ".."));
+      def digest: type == "string" and test("^[a-f0-9]{64}$");
+      .schema_version == 1 and .id == $expected_id and (.id | safe_id) and
+      (.group | safe_id) and (.version | type == "string" and length > 0) and
+      (.destination | safe_rel) and (.destination | startswith("images/") and endswith(".iso")) and
+      (.menu_alias | type == "string" and length > 0) and
+      (.description_ko | type == "string" and length > 0) and
+      (.description_en | type == "string" and length > 0) and
+      (.boot_behavior == "interactive-installer" or .boot_behavior == "live-environment") and
+      .profile_adapter == "none" and
+      .source.kind == "locked-download" and
+      (.source.filename | safe_rel) and (.source.filename | contains("/") | not) and
+      (.source.url | type == "string" and startswith("https://")) and
+      (.source.sha256 | digest)
+    ' "$file" >/dev/null || fail "entry contract is invalid: $path"
+    jq -r '.source.filename' "$file"
+done > "$temporary/source-filenames"
+
+[ "$(wc -l < "$temporary/source-filenames" | tr -d ' ')" = "$(LC_ALL=C sort -u "$temporary/source-filenames" | wc -l | tr -d ' ')" ] ||
+    fail "entry source filenames must be unique"
+
+jq -r '.bootloaders[] | [.id, .path] | @tsv' "$index" |
+while IFS="$tab" read -r expected_id path; do
+    file=$repo_root/$path
+    [ -r "$file" ] || fail "bootloader is not readable: $path"
+    jq -e --arg expected_id "$expected_id" '
+      def safe_id: type == "string" and test("^[a-z0-9][a-z0-9-]*$");
+      def safe_rel:
+        type == "string" and
+        test("^[A-Za-z0-9][A-Za-z0-9._+!/-]*$") and
+        (startswith("/") | not) and
+        (split("/") | all(. != "" and . != "." and . != ".."));
+      def digest: type == "string" and test("^[a-f0-9]{64}$");
+      .schema_version == 1 and .id == $expected_id and (.id | safe_id) and
+      (.implementation | safe_id) and (.version | type == "string" and length > 0) and
+      (.archive_root | safe_rel) and .source.kind == "locked-download" and
+      (.source.filename | safe_rel) and (.source.filename | contains("/") | not) and
+      (.source.url | type == "string" and startswith("https://")) and
+      (.source.sha256 | digest)
+    ' "$file" >/dev/null || fail "bootloader contract is invalid: $path"
+done
+
+echo "device install media catalog: valid"
+
