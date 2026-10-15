@@ -59,6 +59,7 @@ write.
 | `tests/` | Isolated source and rejection simulations |
 
 Adding an OS with an existing `locked-download` contract is a Catalog data
-change. A new source kind or profile adapter changes Installer behavior and must
-include success and rejection coverage.
+change. The DNS image remains a caller-supplied `runtime-artifact`. A new source
+kind or profile adapter changes Installer behavior and must include success and
+rejection coverage.
 
