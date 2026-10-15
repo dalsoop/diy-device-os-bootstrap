@@ -1,6 +1,6 @@
 # Completed World Generations
 
-This directory is intentionally empty in the template. A completed generation
+This directory is intentionally empty until the first qualified write. A completed generation
 appears only after one physical USB has been written and the required readback
 verification has succeeded.
 

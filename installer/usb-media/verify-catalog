@@ -38,8 +38,10 @@ jq -e '
   .schema_version == 1 and
   (.product.name | type == "string" and length > 0) and
   (.product.repository | startswith("https://github.com/")) and
-  (.catalog.repository | startswith("https://github.com/") and endswith(".git")) and
+  .catalog.repository == "https://github.com/dalsoop/gujo-homelab" and
   (.catalog.revision | type == "string" and test("^[a-f0-9]{40}$")) and
+  (.catalog.tree | type == "string" and test("^[a-f0-9]{40}$")) and
+  (.catalog.path | safe_rel) and
   (.catalog.collection | safe_rel) and
   (.usb.data_label | type == "string" and length > 0 and length <= 15) and
   (.usb.enrollment_label | type == "string" and length > 0 and length <= 15) and

@@ -4,10 +4,10 @@
 
 Catalog data is public and non-secret. It is still supply-chain input: a changed
 URL or digest can redirect Installer users to a different artifact. Pull-request
-review, exact commit pinning, HTTPS, authoritative checksum provenance, and
-consumer-side digest verification are independent controls.
+review, exact monorepo and Catalog tree identity, HTTPS, authoritative checksum
+provenance, and consumer-side digest verification are independent controls.
 
-The repository never executes described artifacts or fetched code. It stores no
+The Catalog module never executes described artifacts or fetched code. It stores no
 authentication material and has no reason to receive write access to a user's
 disk.
 
@@ -41,8 +41,8 @@ authenticity. If provenance is missing or contradictory, do not merge the
 update.
 
 Compromised or withdrawn media is handled by removing or correcting the entry in
-a reviewed commit and notifying consumers to repin. Existing Installer pins remain
-historical and are not silently mutated.
+a reviewed commit and notifying consumers to update. Existing resolved plans
+remain historical and are not silently mutated.
 
 ## Incident response
 
@@ -51,6 +51,6 @@ revoke or rotate it, inspect history and CI logs, and remove it through the
 repository's approved history-remediation process.
 
 If an incorrect digest or malicious source is published, preserve evidence,
-block the affected entry, identify every released Catalog commit containing it,
-and communicate the exact safe replacement commit. Do not merely update
-`main` and assume pinned consumers are repaired.
+block the affected entry, identify every released Catalog tree containing it,
+and communicate the exact safe replacement monorepo commit. Do not merely
+update `main` and assume existing media is repaired.

@@ -1,89 +1,39 @@
-# Gujo Homelab OS Catalog
+# Catalog Module
 
-[![CI](https://github.com/dalsoop/gujo-homelab-os-catalog/actions/workflows/ci.yml/badge.svg)](https://github.com/dalsoop/gujo-homelab-os-catalog/actions/workflows/ci.yml)
+This module is the data-only registry of public operating-system and bootloader
+metadata used by the sibling Installer. It publishes official HTTPS locations,
+reviewed SHA-256 values, stable IDs, menu labels, and boot behavior. It never
+downloads, executes, or writes the media it describes.
 
-A public, data-only catalog of bootloaders, operating-system installers, and live
-environments for device installation media. It stores official HTTPS download
-locations, release versions, SHA-256 values, menu descriptions, and boot
-behavior. It does not store or download ISO images.
-
-[Gujo Homelab OS Installer](https://github.com/dalsoop/gujo-homelab-os-installer)
-pins an exact Catalog commit, verifies downloads, and assembles the physical
-USB. A user-owned
-[Gujo Homelab World Playbook](https://github.com/dalsoop/gujo-homelab-world-playbook)
-selects entries and records immutable USB generations once the external
-Installer consumer is implemented.
-
-> **Normal users create only a World Playbook from its GitHub template.** Do not
-> fork this Catalog or the Installer for ordinary use. Fork this Catalog only
-> to contribute reusable public OS metadata.
+The Catalog shares the Gujo Homelab repository so metadata, its Installer
+consumer, fixtures, and World selection can change atomically. It remains an
+untrusted runtime input: the Installer validates the JSON again and records the
+Catalog Git tree identity in every resolved plan.
 
 ## Layout
 
 ```text
 catalog/
-├── index.json
-├── bootloaders/
-│   └── ventoy.json
-└── entries/
-    ├── debian-live.json
-    ├── pop-os.json
-    ├── proxmox-backup-server.json
-    ├── proxmox-ve.json
-    └── truenas-scale.json
+├── catalog/index.json
+├── catalog/entries/*.json
+├── catalog/bootloaders/*.json
+├── schemas/
+├── bin/verify-catalog
+└── tests/catalog-contract.sh
 ```
 
-Each product has an independent file. `catalog/index.json` is the closed-world
-registry: every JSON item is listed exactly once, and unregistered files fail
-validation.
+Each product has one JSON file and appears exactly once in
+`catalog/index.json`. Stable IDs do not contain release numbers. Public entries
+remain interactive installers or live environments with
+`profile_adapter: none`; guarded local profiles belong to the Installer and
+selection belongs to the World.
 
-## Contribute an entry
+For a release update, verify the authoritative vendor version, architecture,
+filename, URL, and lowercase SHA-256 as one review unit. Update the entry and
+index contracts together and rely on the root CI for validation. A passing
+Catalog test proves metadata consistency only, not download provenance, boot,
+firmware, or installation behavior.
 
-1. Fork this repository only for the Catalog contribution.
-2. Add `catalog/entries/<stable-id>.json`.
-3. Register the same ID and path in `catalog/index.json`.
-4. Verify the URL and SHA-256 against an authoritative vendor source.
-5. Run `bin/verify-catalog` and open a pull request.
-
-Private images, organization-only URLs, credentials, hardware inventory, and
-automatic-install profiles do not belong here. Keep user-owned intent in a
-World Playbook and implementation behavior in the Installer.
-
-## Contract summary
-
-- IDs use lowercase letters, digits, and hyphens and do not include a release.
-- Downloads use HTTPS and a lowercase 64-character SHA-256.
-- Destinations are safe relative `images/...iso` paths.
-- Public media is either `interactive-installer` or `live-environment`.
-- Public entries use `profile_adapter: none` and `locked-download`.
-- Duplicate identities, paths, filenames, traversal, unsupported values, and
-  malformed values are rejected. Published schemas disallow additional
-  properties, but the current executable CI verifier does not yet enforce that
-  rule.
-
-```sh
-sudo apt-get install jq shellcheck
-bin/verify-catalog
-```
-
-Run the full local contract gate with:
-
-```sh
-tests/catalog-contract.sh
-```
-
-A valid Catalog proves metadata shape and internal consistency. Installer and
-physical-device verification are separate.
-
-## Documentation
-
-- [Architecture](docs/architecture.md)
-- [Business rules](docs/business-rules.md)
-- [Security](docs/security.md)
-- [Engineering standards](docs/standards.md)
-- [Operations](docs/operations.md)
-- [Data contracts](docs/contracts.md)
-- [Implementation status](docs/tracking/status.md)
-- [Open findings](docs/tracking/findings.md)
-- [Decision index](docs/tracking/decisions/index.md)
+See [contracts](docs/contracts.md), [security](docs/security.md), and
+[engineering standards](docs/standards.md).
 

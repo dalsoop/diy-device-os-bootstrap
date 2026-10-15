@@ -27,12 +27,11 @@ loosening one check.
 
 Symptom: a merged public entry is absent from a user's media.
 
-Cause: World Playbooks pin an exact older Catalog commit, and their media intent
-must also select the stable ID.
+Cause: the active reference collection or World intent does not select the
+stable ID, or the operator is using an older monorepo commit.
 
-Response: update the Playbook pin deliberately, review the Catalog diff between
-commits, add the ID to its selected media, and inspect the Installer's resolved
-plan.
+Response: update deliberately, review the Catalog diff between commits, add the
+ID to selected media, and inspect the Installer's resolved plan.
 
 ## Checksum uncertainty
 

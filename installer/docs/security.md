@@ -2,10 +2,10 @@
 
 ## Trust boundaries
 
-The public Catalog and vendor download endpoints are external inputs. The
-Installer trusts only an exact Catalog commit after local structural validation,
-and trusts media only after SHA-256 verification. It never executes Catalog
-scripts.
+The sibling Catalog and vendor download endpoints are untrusted inputs. The
+Installer records the exact monorepo commit and Catalog tree after local
+structural validation, and trusts media only after SHA-256 verification. It
+never executes Catalog scripts.
 
 The writable exFAT partition is transport, not a security boundary. It is
 mounted `nodev,nosuid,noexec`, and every secret is encrypted before the first

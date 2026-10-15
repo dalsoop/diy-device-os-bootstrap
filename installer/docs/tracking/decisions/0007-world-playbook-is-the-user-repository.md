@@ -1,6 +1,6 @@
 # 0007: Make the World Playbook the Only User-Created Repository
 
-- Status: Accepted
+- Status: Superseded by root decision 0001
 - Date: 2026-10-15
 
 ## Context
@@ -23,7 +23,7 @@ either repository. Installer and Catalog revisions are pinned by the Playbook.
 The canonical template is:
 
 ```text
-https://github.com/dalsoop/gujo-homelab-world-playbook
+https://github.com/dalsoop/gujo-homelab/tree/main/world
 ```
 
 The current Installer-internal composition remains a reference implementation

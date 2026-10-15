@@ -1,6 +1,6 @@
 # Gujo Homelab OS USB
 
-This module combines public Catalog entries with fork-local entries into a
+This module combines public Catalog entries with Installer-local entries into a
 verified Korean-first Ventoy USB.
 
 ## Human workflow
@@ -49,11 +49,12 @@ fixed reserve and overhead already prove the target is too small.
 | --- | --- |
 | `composition.json` | Catalog URL and commit, USB properties, local entries, bundles |
 | `../collections/device-os.json` | Selected public IDs and menu groups |
-| `local-entries/*.json` | Fork-local profiles such as the DNS installer |
-| External Catalog | Public bootloader and OS metadata |
+| `local-entries/*.json` | Installer-owned profiles such as the DNS installer |
+| Sibling Catalog | Public bootloader and OS metadata |
 
-The resolver fetches one exact Catalog commit but does not execute its scripts.
-It validates paths and contracts again, then writes the shared resolved plan to
+The resolver reads the sibling Catalog from the same clean Git snapshot but does
+not execute its scripts. It validates paths and contracts again, records the
+monorepo commit and Catalog tree, then writes the shared resolved plan to
 `work/device-os/catalog.json`.
 
 ## Supported strategies

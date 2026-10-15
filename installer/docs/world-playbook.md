@@ -57,7 +57,7 @@ worlds/
 ```
 
 Changing an address, selected operating system, safety policy, hardware
-binding, or Catalog revision creates a new generation. Rebuilding or writing a
+binding, monorepo commit, or Catalog tree creates a new generation. Rebuilding or writing a
 new physical USB from otherwise identical intent also creates a new generation.
 Old generations are not edited in place, rebased onto a new schema, or silently
 repointed to newer dependencies.
@@ -85,8 +85,8 @@ The records include:
 - generation ID, World slug, `created_at`, and `completed_at`;
 - optional previous-generation ID;
 - canonical World-content digest;
-- exact Installer version or commit;
-- exact Catalog commit and selected entry IDs;
+- exact monorepo commit and Catalog tree identity;
+- exact selected entry IDs;
 - every staged artifact digest and resulting media-manifest digest;
 - redacted target-identity evidence and the verification outcome.
 

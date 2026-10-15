@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/dalsoop/gujo-homelab-os-catalog/schemas/bootloader.schema.json",
+  "$id": "https://github.com/dalsoop/gujo-homelab/blob/main/catalog/schemas/bootloader.schema.json",
   "title": "Device OS Bootloader",
   "type": "object",
   "required": ["schema_version", "id", "implementation", "version", "archive_root", "source"],

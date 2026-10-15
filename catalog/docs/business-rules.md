@@ -41,10 +41,10 @@ identity when a versioned immutable URL is available.
 
 ## Consumer model
 
-A World Playbook chooses which entries to include and pins an exact Catalog
-commit. Catalog merge does not add an item to every USB. Installer resolution,
+A World chooses which entries to include. Resolved plans record the monorepo
+commit and Catalog tree. Catalog merge does not add an item to every USB. Installer resolution,
 download verification, media assembly, and physical qualification remain
 separate.
 
-A Catalog fork may be used for contribution or deliberate testing, but the
-Playbook owner assumes trust for the selected repository and exact commit.
+A monorepo fork may be used for contribution or deliberate testing. Resolved
+plans record the selected monorepo commit and Catalog tree identity.

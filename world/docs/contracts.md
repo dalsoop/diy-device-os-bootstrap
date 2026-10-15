@@ -7,8 +7,10 @@
 generation root, and the generation ID format. Draft and generation paths must
 be safe relative paths contained within this checkout.
 
-`world-playbook.lock.json` pins exact 40-character Installer and Catalog Git
-revisions. Branch names and `latest` are not reproducible inputs.
+The monorepo commit is the exact source identity for the World, Installer, and
+Catalog modules. A resolved plan and completed generation additionally record
+the Catalog Git tree identity. Branch names and `latest` are not reproducible
+inputs.
 
 ## Draft World
 
@@ -59,6 +61,10 @@ It does not contain generated ISO or raw images, caches, plaintext hardware
 serials, credentials, private keys, or recovery material. Completed files are
 never reformatted or migrated in place. A new schema or correction produces a
 new generation.
+
+`world.lock.json` records the monorepo commit, Catalog tree identity, selected
+entry IDs, and exact artifact digests captured by the sealing transaction. It is
+generation output and does not exist in the mutable draft.
 
 ## Evidence boundary
 

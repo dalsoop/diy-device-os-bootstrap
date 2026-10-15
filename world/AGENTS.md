@@ -1,13 +1,14 @@
 # Gujo Homelab World Playbook
 
-This repository is the user-owned source of homelab intent. It contains no
-Installer implementation and no public operating-system catalog data.
+This module is the user-owned source of homelab intent inside the Gujo Homelab
+monorepo. Installer implementation and public Catalog data remain in sibling
+modules and are not duplicated here.
 
 ## Source-of-truth boundaries
 
 - `world-playbook.yaml` identifies mutable drafts and the generation root.
-- `world-playbook.lock.json` pins the Installer and Catalog revisions used while
-  the external integration is being implemented.
+- The monorepo commit and Catalog tree identify the executable and data inputs;
+  completed generations record both identities.
 - `drafts/<slug>/world.yaml` is mutable desired state.
 - `worlds/<YYYYMMDDHHmmss>-<slug>/` contains completed immutable USB
   generations.
@@ -40,6 +41,6 @@ live evidence exists. Keep source validation, image assembly, physical USB
 write, firmware boot, operating-system installation, and network cutover as
 separate evidence states.
 
-The repository is currently a contract scaffold. Do not claim that an external
-Installer has validated, built, or written a World until the corresponding
-command and evidence exist.
+The module is currently a contract scaffold. Do not claim that the Installer
+has validated, built, or written a World until the corresponding command and
+evidence exist.

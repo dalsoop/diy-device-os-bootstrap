@@ -1,25 +1,25 @@
 # Architecture
 
-## Repository role
+## Module role
 
-The World Playbook is the user-owned source of desired homelab state. It is the
-only repository an ordinary operator creates from a template and edits.
+The World module is the user-owned source of desired homelab state inside the
+single Gujo Homelab repository.
 
 ```text
-Gujo Homelab OS Catalog
+catalog/
   reusable public OS metadata
              |
              v
-Gujo Homelab OS Installer <--- Gujo Homelab World Playbook
+installer/ <--- world/
   execution and safety          user intent and immutable generations
              |
              v
       verified physical USB
 ```
 
-The World Playbook does not execute Catalog code, implement a USB writer, or
-hold secret values. The Installer must consume a specific Playbook revision and
-produce explicit plans and evidence without modifying a completed generation.
+The World module does not execute Catalog code, implement a USB writer, or hold
+secret values. The Installer consumes the same monorepo snapshot and produces
+explicit plans and evidence without modifying a completed generation.
 
 ## World model
 
@@ -47,6 +47,6 @@ work. A committed desired value is not proof that the target still matches.
 
 ## Implementation status
 
-The repository currently defines the contract and example intent only. The
-Installer still keeps composition inside its own checkout and does not yet
-accept this Playbook as an external input.
+The module currently defines the contract and example intent only. The
+Installer still keeps its reference composition under `installer/` and does not
+yet resolve media selection from this World draft.

@@ -7,9 +7,9 @@ x86_64 installation or live media. It does not select a user's collection,
 resolve private profiles, download artifacts, build images, render a boot menu,
 or write a disk.
 
-The Installer consumes the Catalog as untrusted, pinned data. User-owned World
-Playbooks select entries without moving local policy or destructive behavior
-into this repository.
+The Installer consumes the sibling Catalog as untrusted data from the same Git
+snapshot. The World selects entries without moving local policy or destructive
+behavior into this module.
 
 ## Components
 
@@ -27,8 +27,8 @@ catalog/index.json
 schemas/*.json
   published contract representation
 
-exact Git commit
-  consumed by Gujo Homelab OS Installer
+Catalog Git tree
+  consumed by the sibling Installer
 ```
 
 The index is the sole registry. Each referenced file owns one stable ID. The
@@ -52,10 +52,10 @@ different from ISO menu metadata.
 
 ## Dependency direction
 
-Vendor release information flows into Catalog data. Catalog data flows by exact
-Git commit into Installer resolution. World Playbook selection also flows into
-Installer resolution. No Installer or Playbook configuration flows back into
-the Catalog, and no Catalog file can supply executable code.
+Vendor release information flows into Catalog data. Catalog data flows by its
+Git tree identity into Installer resolution. World selection also flows into
+Installer resolution. No Installer or World configuration flows back into the
+Catalog, and no Catalog file can supply executable code.
 
 Schemas describe the intended public shape, while `bin/verify-catalog` is the
 CI enforcement surface. Contract changes must keep both representations and
@@ -67,4 +67,4 @@ Validation establishes JSON shape, safe paths, uniqueness, HTTPS use, and digest
 format. It does not prove vendor authenticity, checksum provenance, successful
 download, image integrity beyond the recorded digest, firmware boot, installer
 behavior, or hardware compatibility. Those claims require review and Installer or
-physical evidence outside this repository.
+physical evidence outside this module.

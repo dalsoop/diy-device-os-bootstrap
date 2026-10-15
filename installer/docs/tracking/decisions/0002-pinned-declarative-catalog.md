@@ -1,6 +1,6 @@
 # 0002: Resolve Media Through a Pinned Declarative Catalog
 
-- Status: Accepted
+- Status: Superseded by root decision 0001
 - Date: 2026-10-15
 
 ## Context

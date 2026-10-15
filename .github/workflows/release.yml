@@ -1,4 +1,4 @@
-name: Build installer release candidate
+name: Build DNS installer release candidate
 
 on:
   workflow_dispatch:
@@ -13,11 +13,13 @@ jobs:
       - uses: actions/checkout@v7
       - name: Use runner-local public inputs
         run: |
-          install -m 0644 /etc/dns-appliance-builder/operator-authorized-keys installer/inputs/operator-authorized-keys
-          install -m 0644 /etc/dns-appliance-builder/age-recipient installer/inputs/age-recipient
+          install -m 0644 /etc/dns-appliance-builder/operator-authorized-keys installer/installer/inputs/operator-authorized-keys
+          install -m 0644 /etc/dns-appliance-builder/age-recipient installer/installer/inputs/age-recipient
       - name: Fetch digest-pinned Technitium image
+        working-directory: installer
         run: installer/fetch-locked-sources
       - name: Build candidate ISO and manifests
+        working-directory: installer
         env:
           DNS_APPLIANCE_INVENTORY_DIR: /etc/dns-appliance-builder/inventory
         run: installer/build-image
@@ -26,9 +28,9 @@ jobs:
         with:
           name: dns-appliance-release-evidence
           path: |
-            artifacts/SHA256SUMS
-            artifacts/build-manifest.json
-            artifacts/debian-packages.txt
-            artifacts/debian-package-sha256s.txt
-            artifacts/sbom.spdx.json
+            installer/artifacts/SHA256SUMS
+            installer/artifacts/build-manifest.json
+            installer/artifacts/debian-packages.txt
+            installer/artifacts/debian-package-sha256s.txt
+            installer/artifacts/sbom.spdx.json
           if-no-files-found: error

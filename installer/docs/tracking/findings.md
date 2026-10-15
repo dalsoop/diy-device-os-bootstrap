@@ -36,15 +36,15 @@ command until an immutable plan artifact and approval source are designed.
 
 ## Catalog schema files and executable validation can drift
 
-The Catalog repository publishes JSON Schemas, while its executable verifier is
+The Catalog module publishes JSON Schemas, while its executable verifier is
 the actual CI gate. The Installer reimplements the consumed subset. Coordinated
 contract checks reduce but do not eliminate drift between those three surfaces.
 A future change should either generate one representation from another or add
-cross-repository contract fixtures before expanding schema versions.
+cross-module contract fixtures before expanding schema versions.
 
 ## Vendor checksums need provenance evidence
 
-Catalog values are syntactically validated, but the repository does not retain
+Catalog values are syntactically validated, but the monorepo does not retain
 signed vendor checksum provenance for every release. Reviewers must verify each
 digest against an authoritative vendor channel when updating entries. This
 cannot be solved by trusting a successful download of the same URL.

@@ -21,9 +21,9 @@ build remain Linux-only.
 ./device-os simulate
 ```
 
-These commands may fetch the pinned Catalog Git commit but do not download ISO
-images or write a block device. Review entry behavior, the Catalog revision,
-USB labels, and whether the DNS profile is present.
+These commands read and validate the sibling Catalog but do not download ISO
+images or write a block device. Review entry behavior, the monorepo commit,
+Catalog tree, USB labels, and whether the DNS profile is present.
 
 For an exact DNS-inclusive result, supply the built runtime artifact:
 
@@ -48,7 +48,7 @@ On the Linux builder:
 ./device-os prepare
 ```
 
-Preparation resolves the exact Catalog revision, downloads only
+Preparation resolves the exact monorepo and Catalog tree, downloads only
 `locked-download` sources, verifies SHA-256 before finalizing cache files, and
 rechecks cached files. A failed or partial download is not promoted.
 
@@ -157,7 +157,7 @@ active.
 
 ## Release evidence
 
-Release evidence records the exact Git commit, pinned Catalog revision, source
+Release evidence records the exact Git commit, Catalog tree identity, source
 locks, build environment, commands, checksums, package closure, SBOM, and
 observed gate results. Publish checksums and manifests, not ignored media or
 credentials. If any physical or network gate remains incomplete, label the

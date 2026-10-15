@@ -2,11 +2,11 @@
   "schema_version": 1,
   "product": {
     "name": "Gujo Homelab OS USB",
-    "repository": "https://github.com/dalsoop/gujo-homelab-os-installer"
+    "repository": "https://github.com/dalsoop/gujo-homelab"
   },
   "catalog": {
-    "repository": "https://github.com/dalsoop/gujo-homelab-os-catalog.git",
-    "revision": "e85577ba632c90282da8b5984561ee0825828199",
+    "kind": "workspace",
+    "path": "catalog",
     "index": "catalog/index.json",
     "bootloader": "ventoy"
   },

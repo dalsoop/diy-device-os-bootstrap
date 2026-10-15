@@ -1,14 +1,14 @@
 # Gujo Homelab OS Catalog
 
-This repository is the public, data-only source of bootloader and operating
-system metadata consumed by the Gujo Homelab OS Installer. It publishes
+This module is the public, data-only source of bootloader and operating-system
+metadata consumed by the sibling Installer. It publishes
 versioned JSON contracts, official HTTPS locations, checksums, menu text, and
 boot behavior. It never downloads, executes, or writes the media it describes.
 
 ## Project map
 
 ```text
-gujo-homelab-os-catalog/
+catalog/
 ├── AGENTS.md
 ├── CLAUDE.md
 ├── README.md
@@ -77,6 +77,7 @@ gujo-homelab-os-catalog/
   do not claim strict unknown-field enforcement until parity is implemented.
 - Update data, index, schemas, validator, fixtures, and documentation together
   when a contract changes.
-- A merged Catalog commit is metadata only. Installers must deliberately pin it
-  and perform download, media, firmware, and hardware verification separately.
+- A merged Catalog change is metadata only. Resolved plans must record its Git
+  tree identity, and the Installer performs download, media, firmware, and
+  hardware verification separately.
 

@@ -2,6 +2,7 @@
 set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+monorepo_root=$(CDPATH='' cd -- "$repo_root/.." && pwd)
 composition=$repo_root/usb-media/composition.json
 collection=$(jq -er '.collection' "$composition")
 collection=$repo_root/$collection
@@ -9,7 +10,7 @@ resolved=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
 
 usage() {
     cat <<'EOF'
-Gujo Homelab OS Installer
+Gujo Homelab
 
 Usage:
   ./device-os available                 List available catalog entries
@@ -42,7 +43,7 @@ EOF
 }
 
 fail() {
-    echo "Gujo Homelab OS Installer: $*" >&2
+    echo "Gujo Homelab: $*" >&2
     exit 1
 }
 
@@ -65,7 +66,8 @@ show_plan() {
     echo
     echo "USB label: $(jq -r '.usb.data_label' "$resolved")"
     echo "Default boot-menu language: Korean"
-    echo "Catalog commit: $(jq -r '.catalog.revision' "$resolved")"
+    echo "Monorepo commit: $(jq -r '.catalog.revision' "$resolved")"
+    echo "Catalog tree: $(jq -r '.catalog.tree' "$resolved")"
     echo "Automatic menu timeout: disabled"
     if jq -e '.entries[] | select(.profile_adapter == "dns-appliance")' "$resolved" >/dev/null; then
         echo "DNS install gate: HP inventory, reinstall authorization, and internal disk must match"
@@ -78,7 +80,7 @@ case "$command" in
     available)
         resolve
         selected=$(jq -c '.entries' "$collection")
-        catalog_root=${DEVICE_MEDIA_CATALOG_DIR:-$repo_root/cache/catalogs/$(jq -r '.catalog.revision' "$composition")}
+        catalog_root=${DEVICE_MEDIA_CATALOG_DIR:-$monorepo_root/$(jq -r '.catalog.path' "$composition")}
         index=$catalog_root/$(jq -r '.catalog.index' "$composition")
         jq -r --argjson selected "$selected" '
           .entries[] as $entry |
@@ -89,7 +91,7 @@ case "$command" in
         id=${2:-}
         [ -n "$id" ] || fail "provide an entry ID to include"
         resolve
-        catalog_root=${DEVICE_MEDIA_CATALOG_DIR:-$repo_root/cache/catalogs/$(jq -r '.catalog.revision' "$composition")}
+        catalog_root=${DEVICE_MEDIA_CATALOG_DIR:-$monorepo_root/$(jq -r '.catalog.path' "$composition")}
         index=$catalog_root/$(jq -r '.catalog.index' "$composition")
         jq -e --arg id "$id" '.entries[] | select(.id == $id)' "$index" >/dev/null ||
             fail "entry is not in the catalog: $id"
@@ -115,7 +117,7 @@ case "$command" in
         USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/calculate-capacity" "$@"
         ;;
     simulate)
-        echo "[1/4] Resolve the pinned catalog."
+        echo "[1/4] Resolve the embedded catalog."
         resolve
         echo "[2/4] Combine selected entries and local profiles."
         show_plan

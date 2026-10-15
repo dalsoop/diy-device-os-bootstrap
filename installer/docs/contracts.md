@@ -44,7 +44,7 @@ and target results.
 `usb-media/composition.json` has `schema_version: 1` and owns:
 
 - product name and repository;
-- Catalog HTTPS Git URL, exact 40-character revision, index, and bootloader ID;
+- workspace Catalog path, index, and bootloader ID;
 - one collection path;
 - zero or more safe relative local-entry paths;
 - USB data/enrollment labels and capacity reserves;
@@ -58,10 +58,10 @@ segments. Catalog code is never part of the contract.
 The collection has a stable ID, display name, unique groups, and unique selected
 entry IDs. Group paths and IDs are unique.
 
-The resolver emits a versioned plan containing product, pinned Catalog identity,
-USB properties, one bootloader, groups, selected public plus local entries, and
-bundles. Entry IDs and destinations are unique. Every entry destination belongs
-to its declared group.
+The resolver emits a versioned plan containing the monorepo commit, Catalog Git
+tree identity and path, product, USB properties, one bootloader, groups,
+selected public plus local entries, and bundles. Entry IDs and destinations are
+unique. Every entry destination belongs to its declared group.
 
 The current entry contract accepts:
 

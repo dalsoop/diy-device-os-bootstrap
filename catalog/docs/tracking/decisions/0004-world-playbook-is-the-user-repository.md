@@ -1,6 +1,6 @@
 # 0004: Make the World Playbook the User Repository
 
-- Status: Accepted
+- Status: Superseded by root decision 0001
 - Date: 2026-10-15
 
 ## Context

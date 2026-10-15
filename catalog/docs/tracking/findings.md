@@ -17,12 +17,12 @@ record. A syntactically valid digest can still be wrong. Each update therefore
 depends on pull-request evidence from an authoritative vendor source. A future
 provenance field needs a cross-consumer contract decision.
 
-## Installer compatibility is not tested in this repository
+## Installer compatibility requires the root CI
 
-Catalog CI validates its own contract but does not resolve entries through every
-Installer version. Exact-commit pinning prevents silent changes, but a schema
-change can still break a Installer that deliberately repins. A future
-cross-repository fixture should be added before expanding schema semantics.
+Catalog module tests validate its own contract, while the root CI resolves the
+current Catalog through the current Installer. A schema change can still break
+older released Installers. Compatibility fixtures should be expanded before
+schema semantics change.
 
 ## Vendor URLs may not be immutable
 

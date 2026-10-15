@@ -3,9 +3,9 @@ set -eu
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+monorepo_root=$(CDPATH='' cd -- "$repo_root/.." && pwd)
 composition=${DEVICE_MEDIA_COMPOSITION:-$script_dir/composition.json}
 output=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
-cache_root=${DEVICE_MEDIA_CATALOG_CACHE:-$repo_root/cache/catalogs}
 
 fail() {
     echo "resolve-catalog: $*" >&2
@@ -25,9 +25,9 @@ jq -e '
     (split("/") | all(. != "" and . != "." and . != ".."));
   .schema_version == 1 and
   (.product.name | type == "string" and length > 0) and
-  (.product.repository | startswith("https://github.com/")) and
-  (.catalog.repository | test("^https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[.]git$")) and
-  (.catalog.revision | test("^[a-f0-9]{40}$")) and
+  .product.repository == "https://github.com/dalsoop/gujo-homelab" and
+  .catalog.kind == "workspace" and
+  (.catalog.path | safe_rel) and
   (.catalog.index | safe_rel) and
   (.catalog.bootloader | test("^[a-z0-9][a-z0-9-]*$")) and
   (.collection | safe_rel) and
@@ -35,8 +35,7 @@ jq -e '
   (.bundles | type == "array")
 ' "$composition" >/dev/null || fail "usb-media/composition.json violates its contract"
 
-repository=$(jq -er '.catalog.repository' "$composition")
-revision=$(jq -er '.catalog.revision' "$composition")
+catalog_path=$(jq -er '.catalog.path' "$composition")
 index_path=$(jq -er '.catalog.index' "$composition")
 bootloader_id=$(jq -er '.catalog.bootloader' "$composition")
 collection_path=$(jq -er '.collection' "$composition")
@@ -64,36 +63,24 @@ jq -e '
 if [ -n "${DEVICE_MEDIA_CATALOG_DIR:-}" ]; then
     catalog_root=$DEVICE_MEDIA_CATALOG_DIR
     [ -d "$catalog_root" ] || fail "catalog directory does not exist: $catalog_root"
-    if [ "${DEVICE_MEDIA_ALLOW_UNPINNED_CATALOG:-0}" != 1 ]; then
-        actual_revision=$(git -C "$catalog_root" rev-parse HEAD 2>/dev/null || true)
-        [ "$actual_revision" = "$revision" ] ||
-            fail "local catalog does not match pinned commit $revision"
-    fi
+    [ "${DEVICE_MEDIA_ALLOW_UNPINNED_CATALOG:-0}" = 1 ] ||
+        fail "an external catalog fixture requires DEVICE_MEDIA_ALLOW_UNPINNED_CATALOG=1"
+    revision=0000000000000000000000000000000000000000
+    catalog_tree=0000000000000000000000000000000000000000
 else
-    catalog_root=$cache_root/$revision
-    if [ ! -d "$catalog_root/.git" ]; then
-        mkdir -p "$cache_root"
-        temporary_clone=$(mktemp -d "$cache_root/.catalog.XXXXXX")
-        cleanup_clone() {
-            rm -rf "$temporary_clone"
-        }
-        trap cleanup_clone EXIT HUP INT TERM
-        git -C "$temporary_clone" init -q
-        git -C "$temporary_clone" remote add origin "$repository"
-        git -C "$temporary_clone" fetch -q --depth 1 origin "$revision"
-        git -C "$temporary_clone" checkout -q --detach FETCH_HEAD
-        actual_revision=$(git -C "$temporary_clone" rev-parse HEAD)
-        [ "$actual_revision" = "$revision" ] || fail "fetched catalog does not match the pinned commit"
-        mv "$temporary_clone" "$catalog_root"
-        trap - EXIT HUP INT TERM
-    fi
-    actual_revision=$(git -C "$catalog_root" rev-parse HEAD 2>/dev/null || true)
-    [ "$actual_revision" = "$revision" ] || fail "catalog cache does not match the pinned commit"
+    catalog_root=$monorepo_root/$catalog_path
+    [ -d "$catalog_root" ] || fail "workspace catalog is missing: $catalog_path"
+    [ -z "$(git -C "$monorepo_root" status --porcelain -- "$catalog_path/catalog" "$catalog_path/schemas")" ] ||
+        fail "workspace catalog has uncommitted changes"
+    revision=$(git -C "$monorepo_root" rev-parse HEAD 2>/dev/null) ||
+        fail "monorepo commit is unavailable"
+    catalog_tree=$(git -C "$monorepo_root" rev-parse "HEAD:$catalog_path/catalog" 2>/dev/null) ||
+        fail "catalog tree identity is unavailable"
 fi
 
 index=$catalog_root/$index_path
 if [ ! -f "$index" ] || [ -L "$index" ]; then
-    fail "pinned catalog index is not readable"
+        fail "catalog index is not readable"
 fi
 jq -e '
   def safe_id: type == "string" and test("^[a-z0-9][a-z0-9-]*$");
@@ -107,7 +94,7 @@ jq -e '
   (.entries | type == "array" and all(.[]; (.id | safe_id) and (.path | safe_rel))) and
   (([.bootloaders[].id] | length) == ([.bootloaders[].id] | unique | length)) and
   (([.entries[].id] | length) == ([.entries[].id] | unique | length))
-' "$index" >/dev/null || fail "pinned catalog index violates its contract"
+' "$index" >/dev/null || fail "catalog index violates its contract"
 
 temporary=$(mktemp -d)
 cleanup() {
@@ -166,14 +153,18 @@ jq -n \
     --slurpfile composition "$composition" \
     --slurpfile collection "$collection" \
     --slurpfile bootloader "$bootloader" \
-    --slurpfile entries "$temporary/entries.json" '
+    --slurpfile entries "$temporary/entries.json" \
+    --arg revision "$revision" \
+    --arg catalog_tree "$catalog_tree" '
   ($composition[0]) as $c |
   {
     schema_version: 1,
     product: $c.product,
     catalog: {
-      repository: $c.catalog.repository,
-      revision: $c.catalog.revision,
+      repository: $c.product.repository,
+      revision: $revision,
+      tree: $catalog_tree,
+      path: $c.catalog.path,
       collection: $c.collection
     },
     usb: $c.usb,
@@ -189,4 +180,5 @@ mkdir -p "$(dirname -- "$output")"
 mv "$temporary/catalog.json" "$output"
 
 echo "Resolved catalog: $output"
-echo "Pinned revision: $revision"
+echo "Monorepo revision: $revision"
+echo "Catalog tree: $catalog_tree"

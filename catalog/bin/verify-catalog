@@ -23,7 +23,7 @@ jq -e '
     (split("/") | all(. != "" and . != "." and . != ".."));
   .schema_version == 1 and
   .name == "Gujo Homelab OS Catalog" and
-  .repository == "https://github.com/dalsoop/gujo-homelab-os-catalog" and
+  .repository == "https://github.com/dalsoop/gujo-homelab" and
   (.bootloaders | type == "array" and length > 0) and
   (.entries | type == "array" and length > 0) and
   (all(.bootloaders[]; (.id | safe_id) and (.path | safe_rel) and (.path | startswith("catalog/bootloaders/")))) and

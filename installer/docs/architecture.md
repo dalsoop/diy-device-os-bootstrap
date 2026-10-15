@@ -2,26 +2,26 @@
 
 ## System boundary
 
-The repository implements two engine surfaces with a shared safety model:
+The Installer module implements two engine surfaces with a shared safety model:
 
 1. a reusable multiboot OS installer; and
 2. a local DNS-appliance profile that demonstrates guarded unattended
    installation and post-install management.
 
-The public Gujo Homelab OS Catalog is an external, data-only dependency. The
-user-owned Gujo Homelab World Playbook is the planned external source of media
-selection and environment intent. The Installer pins one exact Catalog commit,
-resolves selected entries plus local inputs, and produces a plan. The Installer
-never executes Catalog code.
+The sibling Catalog is a data-only, untrusted input in the same Git snapshot.
+The sibling World is the planned source of media selection and environment
+intent. The Installer records the monorepo commit and Catalog tree, resolves
+selected entries plus local inputs, and produces a plan. It never executes
+Catalog code.
 
 Ongoing DNS host configuration and long-lived secrets are outside this
-repository. The repository owns Day-0 media, first boot, enrollment, portable
+module. The module owns Day-0 media, first boot, enrollment, portable
 verification tools, and explicit management commands.
 
-## Planned World Playbook boundary
+## Planned World boundary
 
 The user-owned
-[Gujo Homelab World Playbook](https://github.com/dalsoop/gujo-homelab-world-playbook)
+[Gujo Homelab World Playbook](https://github.com/dalsoop/gujo-homelab/tree/main/world)
 is the planned source of environment
 intent. It will select Catalog entries, bind installation intent to the user's
 devices, and provide policy to this Installer without moving Installer behavior
@@ -34,13 +34,13 @@ append-only, including repeated writes from identical desired state. See
 [`world-playbook.md`](world-playbook.md) and decision
 [`0006`](tracking/decisions/0006-append-only-world-generations.md).
 
-This boundary is documented but not implemented. The current repository still
+This boundary is documented but not implemented. The current Installer module still
 owns `usb-media/composition.json` and `collections/device-os.json` directly.
 
 ## Components and dependency direction
 
 ```text
-Public Catalog JSON at an exact commit
+Sibling Catalog JSON at an exact tree
                    |
                    v
 usb-media/resolve-catalog <--- collections/ + local-entries/
@@ -71,11 +71,11 @@ do not become an appliance boot dependency.
 
 ## Media composition
 
-`usb-media/composition.json` pins the Catalog repository, 40-character
-revision, index, bootloader, local entries, USB labels, reserve sizes, and
-bundles. `collections/device-os.json` selects public entry IDs and defines
-menu groups. The resolver copies only referenced JSON, validates paths and IDs,
-and emits `work/device-os/catalog.json`.
+`usb-media/composition.json` names the workspace Catalog path, index,
+bootloader, local entries, USB labels, reserve sizes, and bundles.
+`collections/device-os.json` selects public entry IDs and defines menu groups.
+The resolver copies only referenced JSON, validates paths and IDs, records the
+monorepo commit and Catalog tree, and emits `work/device-os/catalog.json`.
 
 The resolved plan is the single input for download, checksum verification,
 Ventoy menu generation, capacity calculation, and USB staging. Existing

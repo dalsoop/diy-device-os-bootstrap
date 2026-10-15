@@ -2,10 +2,9 @@
 
 ## Product model
 
-The Installer is a shared execution engine and is not the ordinary user's fork
-target. A user creates one repository from the Gujo Homelab World Playbook
-template. That Playbook owns selected media, local profiles, hardware bindings,
-USB labels, safety policy, and append-only USB generations. Public media
+The Installer is the execution module inside the single Gujo Homelab repository.
+The sibling World owns selected media, local profiles, hardware bindings, USB
+labels, safety policy, and append-only USB generations. Public media
 metadata is contributed to the Catalog rather than copied into either the
 Installer or a Playbook.
 
@@ -17,8 +16,8 @@ Inclusion in one USB does not grant the same automation level to every entry.
 
 - Every public artifact is selected by stable entry ID.
 - Every remote artifact uses HTTPS and a lowercase SHA-256.
-- A Catalog branch, tag, or `latest` reference is not a reproducible input; the
-  Installer accepts an exact commit.
+- A branch, tag, or `latest` label is not a reproducible identity; resolved
+  plans record the exact monorepo commit and Catalog tree.
 - Public Catalog content is untrusted input until Installer validation succeeds.
 - General OS installers use `interactive-installer`; diagnostic systems use
   `live-environment`.
@@ -32,13 +31,12 @@ Inclusion in one USB does not grant the same automation level to every entry.
 
 ## World Playbook customization
 
-A user adds or removes public entries in the World Playbook. A private or
-organization-specific image belongs in a Playbook-local entry. Selecting a
-different Catalog repository transfers trust to that repository and its exact
-commit.
+A user adds or removes public entries in the World. A private or
+organization-specific image belongs in World-local intent. The Catalog remains
+the reviewed public metadata source in this monorepo.
 
 The current `collections/` and `usb-media/local-entries/` directories remain an
-Installer-owned reference surface until the external World consumer is
+Installer-owned reference surface until the World consumer is
 implemented. They are not the final user customization boundary.
 
 An entry that uses an implemented source kind and `profile_adapter: none` must

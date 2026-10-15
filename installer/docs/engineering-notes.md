@@ -2,22 +2,21 @@
 
 ## Catalog resolution
 
-Symptom: a local Catalog checkout is accepted even though it does not match the
-composition.
+Symptom: an external Catalog fixture is accepted during normal operation.
 
-Cause: local development bypassed the exact revision check.
+Cause: isolated-test opt-in leaked into a normal invocation.
 
 Response: leave `DEVICE_MEDIA_ALLOW_UNPINNED_CATALOG` unset for release work.
-Use it only in isolated fixtures. Confirm the resolved plan records the pinned
-revision.
+Use it only with an explicit external fixture. Confirm the resolved plan records
+the monorepo commit and Catalog tree.
 
 Symptom: a new public entry is present in the Catalog but absent from the USB.
 
 Cause: Catalog availability and Installer selection are separate. The entry was
-not added to the collection, or the Installer still pins an older Catalog commit.
+not added to the collection used by the reference composition.
 
-Response: update the exact revision, add the stable ID to the collection, then
-resolve and inspect the plan before downloading.
+Response: add the stable ID to the collection, then resolve and inspect the plan
+before downloading.
 
 ## Polymorphism limits
 

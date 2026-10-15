@@ -1,11 +1,11 @@
 # USB Media Module
 
-This module resolves a pinned public Catalog with fork-local choices and writes
-the resulting multiboot USB.
+This module resolves the sibling data-only Catalog with the reference choices
+and writes the resulting multiboot USB.
 
 - Treat external Catalog files as untrusted data. Never execute fetched code.
-- Accept only the exact configured commit unless an isolated test explicitly
-  opts into an unpinned local fixture.
+- Record the exact monorepo commit and Catalog tree. Accept an external
+  unpinned Catalog only when an isolated test explicitly opts in.
 - Keep entry handling driven by the resolved plan. Do not add product-name
   branches for entries that fit an existing source kind.
 - Reject unknown source kinds, profile adapters, duplicate IDs or destinations,

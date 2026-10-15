@@ -1,16 +1,16 @@
 # Gujo Homelab OS Installer
 
-This engine repository assembles verified public installation media into one
-multiboot USB. Ordinary users create a Gujo Homelab World Playbook from its
-GitHub template rather than forking this repository. General media composition
-is the primary product. The guarded
+This engine module assembles verified public installation media into one
+multiboot USB inside the Gujo Homelab monorepo. Users manage the monorepo as one
+source of truth while this directory remains the execution boundary. General
+media composition is the primary product. The guarded
 offline installer for three HP DNS appliances is a bundled local reference
 profile, not the identity of the whole repository.
 
 ## Project map
 
 ```text
-gujo-homelab-os-installer/
+installer/
 ├── AGENTS.md
 ├── CLAUDE.md
 ├── device-os
@@ -68,8 +68,8 @@ gujo-homelab-os-installer/
 - Planning and simulation never write disks. USB and DNS installation writes
   require live target identity checks and exact target-specific confirmation;
   zero, removable, installer-media, or ambiguous internal candidates fail closed.
-- Treat the public Catalog as untrusted data: pin one exact commit, execute none
-  of its code, and validate its JSON again in the Installer.
+- Treat the sibling Catalog as untrusted data: record the monorepo commit and
+  Catalog tree identity, execute none of its code, and validate its JSON again.
 - General installers remain interactive. DNS unattended installation is limited
   to its local guarded adapter and generation-bound reinstall authorization.
 - Report source, VM, physical-media, firmware, installation, and network
@@ -88,8 +88,8 @@ gujo-homelab-os-installer/
 ## Change and verification workflow
 
 - Protect `main`; land substantive changes through pull requests.
-- User-owned selection and environment intent belong in the World Playbook.
-  Do not direct ordinary users to fork this Installer or the Catalog.
+- User-owned selection and environment intent belong in the sibling `world/`
+  module. Direct ordinary users to the monorepo root.
 - Change public OS metadata in the Catalog. The existing
   `usb-media/local-entries/` content is an Installer-owned reference profile;
   new user-specific selection, hardware binding, and policy belong in the World
