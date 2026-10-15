@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "name": "Gujo Homelab OS Catalog",
+  "repository": "https://github.com/dalsoop/gujo-homelab-os-catalog",
+  "bootloaders": [
+    { "id": "ventoy", "path": "catalog/bootloaders/ventoy.json" }
+  ],
+  "entries": [
+    { "id": "debian-live", "path": "catalog/entries/debian-live.json" },
+    { "id": "pop-os", "path": "catalog/entries/pop-os.json" },
+    { "id": "proxmox-backup-server", "path": "catalog/entries/proxmox-backup-server.json" },
+    { "id": "proxmox-ve", "path": "catalog/entries/proxmox-ve.json" },
+    { "id": "truenas-scale", "path": "catalog/entries/truenas-scale.json" }
+  ]
+}
+

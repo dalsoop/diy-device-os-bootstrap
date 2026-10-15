@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "debian-live",
+  "group": "tools",
+  "version": "13.7.0",
+  "architecture": "x86_64",
+  "destination": "images/90-tools/debian-live-13.7.0.iso",
+  "menu_alias": "Debian Live 13.7.0 장비 점검",
+  "description_ko": "설치 전 인벤토리 확인과 비파괴 복구에 사용하는 라이브 환경이다.",
+  "description_en": "Live environment for inventory capture and non-destructive recovery.",
+  "boot_behavior": "live-environment",
+  "profile_adapter": "none",
+  "source": {
+    "kind": "locked-download",
+    "filename": "debian-live-13.7.0-amd64-standard.iso",
+    "url": "https://cdimage.debian.org/debian-cd/13.7.0-live/amd64/iso-hybrid/debian-live-13.7.0-amd64-standard.iso",
+    "sha256": "040a44f35186321eb6cdaab52a8a2d06224fe6b77f6fbb9f1861ad89c14e17ec"
+  }
+}
+
