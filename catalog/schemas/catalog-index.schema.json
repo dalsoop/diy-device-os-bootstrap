@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/dalsoop/gujo-homelab-os-playbook/blob/main/catalog/schemas/catalog-index.schema.json",
+  "$id": "https://github.com/dalsoop/gujo-homelab-device-bootstrap/blob/main/catalog/schemas/catalog-index.schema.json",
   "title": "Gujo Homelab OS Catalog Index",
   "type": "object",
   "required": ["schema_version", "name", "repository", "bootloaders", "entries"],

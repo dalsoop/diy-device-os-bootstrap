@@ -155,7 +155,7 @@ jq -n \
     --arg technitium "$TECHNITIUM_IMAGE@$TECHNITIUM_AMD64_DIGEST" \
     --arg tailscale "$TAILSCALE_VERSION" \
     --rawfile packages "$packages_file" \
-    '{spdxVersion:"SPDX-2.3",dataLicense:"CC0-1.0",SPDXID:"SPDXRef-DOCUMENT",name:$name,documentNamespace:("https://github.com/dalsoop/gujo-homelab-os-playbook/releases/"+$name),packages:([($packages|split("\n")[]|select(length>0))|{name:(split("=")[0]),versionInfo:(split("=")[1]),SPDXID:("SPDXRef-Package-"+(gsub("[^A-Za-z0-9.-]";"-"))),downloadLocation:"NOASSERTION",filesAnalyzed:false}]+[{name:"technitium-dns-server",versionInfo:$technitium,SPDXID:"SPDXRef-Technitium",downloadLocation:"NOASSERTION",filesAnalyzed:false},{name:"tailscale",versionInfo:$tailscale,SPDXID:"SPDXRef-Tailscale",downloadLocation:"NOASSERTION",filesAnalyzed:false}])}' \
+    '{spdxVersion:"SPDX-2.3",dataLicense:"CC0-1.0",SPDXID:"SPDXRef-DOCUMENT",name:$name,documentNamespace:("https://github.com/dalsoop/gujo-homelab-device-bootstrap/releases/"+$name),packages:([($packages|split("\n")[]|select(length>0))|{name:(split("=")[0]),versionInfo:(split("=")[1]),SPDXID:("SPDXRef-Package-"+(gsub("[^A-Za-z0-9.-]";"-"))),downloadLocation:"NOASSERTION",filesAnalyzed:false}]+[{name:"technitium-dns-server",versionInfo:$technitium,SPDXID:"SPDXRef-Technitium",downloadLocation:"NOASSERTION",filesAnalyzed:false},{name:"tailscale",versionInfo:$tailscale,SPDXID:"SPDXRef-Tailscale",downloadLocation:"NOASSERTION",filesAnalyzed:false}])}' \
     > "$artifact_dir/sbom.spdx.json"
 
 echo "build manifest: $artifact_dir/build-manifest.json"

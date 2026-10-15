@@ -10,7 +10,7 @@ resolved=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
 
 usage() {
     cat <<'EOF'
-Gujo Homelab OS Playbook
+Gujo Homelab Device Bootstrap
 
 Usage:
   ./device-os available                 List available catalog entries
@@ -43,7 +43,7 @@ EOF
 }
 
 fail() {
-    echo "Gujo Homelab OS Playbook: $*" >&2
+    echo "Gujo Homelab Device Bootstrap: $*" >&2
     exit 1
 }
 

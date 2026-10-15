@@ -5,7 +5,7 @@ metadata used by the sibling Installer. It publishes official HTTPS locations,
 reviewed SHA-256 values, stable IDs, menu labels, and boot behavior. It never
 downloads, executes, or writes the media it describes.
 
-The Catalog shares the Gujo Homelab OS Playbook repository so metadata, its Installer
+The Catalog shares the Gujo Homelab Device Bootstrap repository so metadata, its Installer
 consumer, fixtures, and World selection can change atomically. It remains an
 untrusted runtime input: the Installer validates the JSON again and records the
 Catalog Git tree identity in every resolved plan.
