@@ -30,9 +30,9 @@ Boot a trusted Debian live environment and identify the wired interface and the
 single internal target disk. From a checkout of this repository, run:
 
 ```sh
-mkdir -p inventory/local
-sudo installer/capture-inventory dns01 10.0.5.1 enp1s0 /dev/sda \
-  > inventory/local/dns01.conf
+mkdir -p installer/inventory/local
+sudo installer/installer/capture-inventory dns01 10.0.5.1 enp1s0 /dev/sda \
+  > installer/inventory/local/dns01.conf
 ```
 
 Repeat for `dns02` and `dns03`. Review every generated file. Only after confirming
@@ -41,8 +41,8 @@ For the first physical pilot, enable only `dns01`; disabled role files may remai
 as copies of their examples:
 
 ```sh
-cp inventory/nodes/dns02.conf.example inventory/local/dns02.conf
-cp inventory/nodes/dns03.conf.example inventory/local/dns03.conf
+cp installer/inventory/nodes/dns02.conf.example installer/inventory/local/dns02.conf
+cp installer/inventory/nodes/dns03.conf.example installer/inventory/local/dns03.conf
 ```
 
 The builder requires at least one enabled role.
@@ -50,7 +50,7 @@ The builder requires at least one enabled role.
 Copy the operator's public SSH key, never the private key:
 
 ```sh
-cp /path/to/id_ed25519.pub installer/inputs/operator-authorized-keys
+cp /path/to/id_ed25519.pub installer/installer/inputs/operator-authorized-keys
 ```
 
 Create a dedicated age identity on the management machine and copy only its
@@ -59,7 +59,7 @@ public recipient into the installer input:
 ```sh
 age-keygen -o /secure/dns-recovery-age-key.txt
 age-keygen -y /secure/dns-recovery-age-key.txt \
-  > installer/inputs/age-recipient
+  > installer/installer/inputs/age-recipient
 ```
 
 ## Build
@@ -69,37 +69,38 @@ Build on an amd64 Debian 13 machine with `simple-cdd` installed:
 ```sh
 sudo apt-get install simple-cdd debian-cd debian-archive-keyring \
   reprepro rsync xorriso isolinux syslinux-common skopeo jq curl
-installer/fetch-locked-sources
-installer/build-image
+installer/installer/fetch-locked-sources
+installer/installer/build-image
 ```
 
 The builder refuses macOS, non-amd64 hosts, missing SSH keys, incomplete
 inventory, placeholders in enabled roles, malformed hashes, and a completely
-disabled inventory. Build output is written under `installer/simple-cdd/images/`
-and remains ignored by Git.
+disabled inventory. Build output is written under
+`installer/installer/simple-cdd/images/` and remains ignored by Git.
 
 The source lock currently selects Debian 13.7, the `20261011T000000Z` Debian
 snapshot, Simple-CDD 0.6.9, and the Technitium 15.6.1 linux/amd64 manifest
 digest, plus Tailscale 1.104.1 for linux/amd64 by SHA-256. Build evidence is
-emitted under ignored `artifacts/`.
+emitted under ignored `installer/artifacts/`.
 
-## Create the two-part USB
+## Add the DNS image to the multiboot USB
 
-The guarded writer currently runs on Linux because it must append an exFAT
-partition after the hybrid installer image. It refuses a non-removable target,
-the root disk, a checksum mismatch, insufficient free space, or an inexact erase
-confirmation:
+Use the root multiboot writer on Linux. It stages the verified DNS image beside
+the selected public media and creates `DNS-ENROLL`. It refuses a non-removable
+target, the root disk, a missing serial, a checksum mismatch, insufficient
+capacity, or an inexact device-and-serial confirmation:
 
 ```sh
-sudo installer/write-usb-linux \
+sudo ./device-os write \
   --device /dev/sdX \
-  --iso installer/simple-cdd/images/<image>.iso \
-  --manifest artifacts/build-manifest.json \
-  --confirm 'ERASE /dev/sdX'
+  --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
+  --runtime-manifest dns-appliance=/absolute/path/build-manifest.json \
+  --confirm 'ERASE /dev/sdX USB_SERIAL'
 ```
 
-The result contains the immutable installer plus `DNS-ENROLL`. Re-identify the
-device every time; never copy a previous command without checking `lsblk`.
+The result contains the selected multiboot media plus `DNS-ENROLL`. Re-identify
+the device and serial every time; never copy a previous command without checking
+`lsblk`.
 
 ## Install behavior
 
@@ -129,14 +130,14 @@ machine so no shared join secret is embedded in the public installer.
 After all three `ACTIVE` records exist, import and cluster them:
 
 ```sh
-management/import-enrollment \
+installer/management/import-enrollment \
   --enrollment /Volumes/DNS-ENROLL \
   --identity /secure/dns-recovery-age-key.txt \
   --output /secure/dns-bootstrap
 
 DNS_CLUSTER_CREDENTIALS_DIR=/secure/dns-bootstrap \
 DNS_CLUSTER_ACCESS_OUTPUT=/secure/cluster-access.json.age \
-  management/cluster-bootstrap
+  installer/management/cluster-bootstrap
 ```
 
 Cockpit is then available as `operator` at `https://10.0.5.1:9090` through

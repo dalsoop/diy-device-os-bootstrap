@@ -32,9 +32,10 @@ The macOS writer accepts only a physical, writable, removable whole disk whose
 size exactly matches an MBR image. It invalidates the old partition map, writes
 and verifies the image body while automatic mounting is impossible, commits and
 verifies the first MiB last, then unmounts and ejects. GPT images are rejected.
-Creating the full-disk image remains a separate build step; the current macOS
-backend uses the pinned Linux Ventoy installer in an isolated QEMU guest because
-Ventoy does not provide a native macOS installer.
+Creating the full-disk image remains a separate build step. This repository does
+not currently provide a Linux/QEMU builder for that image, and Ventoy does not
+provide a native macOS installer. Use the Linux `./device-os write` workflow for
+complete USB assembly until a full-disk image builder is implemented.
 
 `capacity` sums selected image sizes, the enrollment reserve, and configured
 overhead. Cached files and runtime artifacts with matching manifests provide

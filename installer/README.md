@@ -40,11 +40,14 @@ removable non-root target, a readable serial, sufficient capacity, and the exact
 `ERASE <device> <serial>` confirmation.
 
 macOS may write a previously prepared, exact-size MBR disk image through the
-guarded `write-image-macos` path. Building that full image remains a Linux task.
+guarded `write-image-macos` path. This repository does not yet provide the
+Linux/QEMU builder for that image; complete USB assembly uses the Linux
+`device-os write` path.
 
 Read [operations](docs/operations.md), [security](docs/security.md), and the
 [physical verification gates](docs/verification.md) before any release or disk
-write.
+write. Ordinary operators should begin with the root
+[Getting Started guide](../docs/getting-started.md).
 
 ## Module map
 

@@ -9,7 +9,7 @@ Debian/Ubuntu:
 sudo apt-get update
 sudo apt-get install -y git jq shellcheck
 git clone https://github.com/dalsoop/gujo-homelab-os-playbook.git
-cd gujo-homelab/catalog
+cd gujo-homelab-os-playbook/catalog
 ```
 
 Catalog operations do not require root after package installation and must not
