@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "name": "Device Install Media Catalog",
-  "repository": "https://github.com/dalsoop/device-install-media-catalog",
+  "name": "Device OS Catalog",
+  "repository": "https://github.com/dalsoop/device-os-catalog",
   "bootloaders": [
     { "id": "ventoy", "path": "catalog/bootloaders/ventoy.json" }
   ],
