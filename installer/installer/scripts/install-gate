@@ -1,0 +1,266 @@
+#!/bin/sh
+set -eu
+
+media_dir=${DNS_INSTALLER_MEDIA_DIR:-/cdrom/simple-cdd}
+state_dir=${DNS_INSTALLER_STATE_DIR:-/run/dns-appliance}
+sys_root=${DNS_INSTALLER_SYS_ROOT:-/sys}
+mounts_file=${DNS_INSTALLER_MOUNTS_FILE:-/proc/mounts}
+debconf_set_command=${DNS_INSTALLER_DEBCONF_SET:-debconf-set}
+state_file=$state_dir/install.env
+
+fail() {
+    message="DNS appliance install blocked: $*"
+    logger -t dns-appliance-installer "$message" 2>/dev/null || true
+    echo "$message" >&2
+    exit 1
+}
+
+normalize() {
+    LC_ALL=C tr '[:lower:]' '[:upper:]' |
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+hash_value() {
+    value=$1
+    [ -n "$value" ] || fail "empty hardware identity"
+    printf '%s' "$value" | normalize | sha256sum | awk '{print $1}'
+}
+
+read_first_line() {
+    file=$1
+    [ -r "$file" ] || fail "cannot read $file"
+    sed -n '1p' "$file"
+}
+
+set_debconf() {
+    "$debconf_set_command" "$@"
+}
+
+load_config() {
+    config=$1
+    ROLE=
+    ADDRESS=
+    PREFIX_LENGTH=
+    NETMASK=
+    GATEWAY=
+    DNS_SERVERS=
+    DOMAIN=
+    LAN_CIDR=
+    MANAGEMENT_CIDR=
+    CLUSTER_DOMAIN=
+    EXPECTED_PRODUCT_NAME_SHA256=
+    EXPECTED_PRODUCT_SKU_SHA256=
+    EXPECTED_SYSTEM_SERIAL_SHA256=
+    EXPECTED_SYSTEM_UUID_SHA256=
+    EXPECTED_MAC_SHA256=
+    EXPECTED_DISK_MODEL_SHA256=
+    EXPECTED_DISK_SERIAL_SHA256=
+    EXPECTED_DISK_MIN_BYTES=
+    DESTRUCTIVE_INSTALL_ENABLED=
+
+    while IFS='=' read -r key value; do
+        case "$key" in
+            role) ROLE=$value ;;
+            address) ADDRESS=$value ;;
+            prefix_length) PREFIX_LENGTH=$value ;;
+            netmask) NETMASK=$value ;;
+            gateway) GATEWAY=$value ;;
+            dns_servers) DNS_SERVERS=$value ;;
+            domain) DOMAIN=$value ;;
+            lan_cidr) LAN_CIDR=$value ;;
+            management_cidr) MANAGEMENT_CIDR=$value ;;
+            cluster_domain) CLUSTER_DOMAIN=$value ;;
+            expected_product_name_sha256) EXPECTED_PRODUCT_NAME_SHA256=$value ;;
+            expected_product_sku_sha256) EXPECTED_PRODUCT_SKU_SHA256=$value ;;
+            expected_system_serial_sha256) EXPECTED_SYSTEM_SERIAL_SHA256=$value ;;
+            expected_system_uuid_sha256) EXPECTED_SYSTEM_UUID_SHA256=$value ;;
+            expected_mac_sha256) EXPECTED_MAC_SHA256=$value ;;
+            expected_disk_model_sha256) EXPECTED_DISK_MODEL_SHA256=$value ;;
+            expected_disk_serial_sha256) EXPECTED_DISK_SERIAL_SHA256=$value ;;
+            expected_disk_min_bytes) EXPECTED_DISK_MIN_BYTES=$value ;;
+            destructive_install_enabled) DESTRUCTIVE_INSTALL_ENABLED=$value ;;
+        esac
+    done < "$config"
+}
+
+match_node() {
+    product_name_hash=$(hash_value "$(read_first_line "$sys_root/class/dmi/id/product_name")")
+    product_sku_hash=$(hash_value "$(read_first_line "$sys_root/class/dmi/id/product_sku")")
+    system_serial_hash=$(hash_value "$(read_first_line "$sys_root/class/dmi/id/product_serial")")
+    system_uuid_hash=$(hash_value "$(read_first_line "$sys_root/class/dmi/id/product_uuid")")
+
+    matches=0
+    matched_config=
+    matched_nic=
+
+    for config in "$media_dir"/dns01.conf "$media_dir"/dns02.conf "$media_dir"/dns03.conf; do
+        [ -r "$config" ] || fail "missing embedded inventory $(basename "$config")"
+        load_config "$config"
+        [ "$DESTRUCTIVE_INSTALL_ENABLED" = true ] || continue
+        [ "$product_name_hash" = "$EXPECTED_PRODUCT_NAME_SHA256" ] || continue
+        [ "$product_sku_hash" = "$EXPECTED_PRODUCT_SKU_SHA256" ] || continue
+        [ "$system_serial_hash" = "$EXPECTED_SYSTEM_SERIAL_SHA256" ] || continue
+        [ "$system_uuid_hash" = "$EXPECTED_SYSTEM_UUID_SHA256" ] || continue
+
+        nic_match=
+        nic_count=0
+        for nic_path in "$sys_root"/class/net/*; do
+            nic=${nic_path##*/}
+            [ "$nic" = lo ] && continue
+            [ -r "$nic_path/address" ] || continue
+            mac_hash=$(hash_value "$(read_first_line "$nic_path/address")")
+            if [ "$mac_hash" = "$EXPECTED_MAC_SHA256" ]; then
+                nic_match=$nic
+                nic_count=$((nic_count + 1))
+            fi
+        done
+        [ "$nic_count" -eq 1 ] || continue
+
+        matches=$((matches + 1))
+        matched_config=$config
+        matched_nic=$nic_match
+    done
+
+    [ "$matches" -eq 1 ] || fail "hardware matched $matches inventory entries; expected exactly one"
+    load_config "$matched_config"
+    NIC_NAME=$matched_nic
+    NIC_MAC=$(read_first_line "$sys_root/class/net/$NIC_NAME/address")
+
+    for value in "$ROLE" "$ADDRESS" "$PREFIX_LENGTH" "$NETMASK" "$GATEWAY" \
+        "$DNS_SERVERS" "$DOMAIN" "$LAN_CIDR" "$MANAGEMENT_CIDR" "$CLUSTER_DOMAIN"; do
+        [ -n "$value" ] || fail "inventory entry for $ROLE is incomplete"
+    done
+
+    check_reinstall_permission
+
+    mkdir -p "$state_dir"
+    {
+        printf 'ROLE=%s\n' "$ROLE"
+        printf 'ADDRESS=%s\n' "$ADDRESS"
+        printf 'PREFIX_LENGTH=%s\n' "$PREFIX_LENGTH"
+        printf 'NETMASK=%s\n' "$NETMASK"
+        printf 'GATEWAY=%s\n' "$GATEWAY"
+        printf 'DNS_SERVERS=%s\n' "$DNS_SERVERS"
+        printf 'DOMAIN=%s\n' "$DOMAIN"
+        printf 'LAN_CIDR=%s\n' "$LAN_CIDR"
+        printf 'MANAGEMENT_CIDR=%s\n' "$MANAGEMENT_CIDR"
+        printf 'CLUSTER_DOMAIN=%s\n' "$CLUSTER_DOMAIN"
+        printf 'NIC_NAME=%s\n' "$NIC_NAME"
+        printf 'NIC_MAC=%s\n' "$NIC_MAC"
+    } > "$state_file"
+
+    set_debconf netcfg/choose_interface "$NIC_NAME"
+    set_debconf netcfg/get_hostname "$ROLE"
+    set_debconf netcfg/get_domain "$DOMAIN"
+    set_debconf netcfg/get_ipaddress "$ADDRESS"
+    set_debconf netcfg/get_netmask "$NETMASK"
+    set_debconf netcfg/get_gateway "$GATEWAY"
+    set_debconf netcfg/get_nameservers "$DNS_SERVERS"
+    set_debconf netcfg/confirm_static true
+}
+
+check_reinstall_permission() {
+    enrollment_dir=${DNS_INSTALLER_ENROLLMENT_DIR:-}
+    mounted_enrollment=false
+
+    if [ -z "$enrollment_dir" ]; then
+        command -v blkid >/dev/null 2>&1 || fail "blkid is required to find DNS-ENROLL"
+        enrollment_device=$(blkid -L DNS-ENROLL 2>/dev/null || true)
+        [ -n "$enrollment_device" ] || fail "DNS-ENROLL partition is missing"
+        enrollment_dir=$state_dir/enrollment
+        mkdir -p "$enrollment_dir"
+        mount -o ro,nodev,nosuid,noexec "$enrollment_device" "$enrollment_dir" ||
+            fail "cannot mount DNS-ENROLL read-only"
+        mounted_enrollment=true
+    fi
+
+    active_file=$enrollment_dir/records/$ROLE/ACTIVE
+    if [ ! -s "$active_file" ]; then
+        [ "$mounted_enrollment" = false ] || umount "$enrollment_dir"
+        return 0
+    fi
+
+    previous_generation=$(sed -n '1p' "$active_file")
+    token=$enrollment_dir/reinstall/$ROLE.allow
+    [ -r "$token" ] || fail "$ROLE already completed generation $previous_generation; reinstall token missing"
+
+    token_role=$(awk -F= '$1 == "role" { print $2 }' "$token")
+    token_uuid=$(awk -F= '$1 == "system_uuid_sha256" { print $2 }' "$token")
+    token_generation=$(awk -F= '$1 == "previous_generation" { print $2 }' "$token")
+    token_authorize=$(awk -F= '$1 == "authorize_erase" { print $2 }' "$token")
+
+    [ "$token_role" = "$ROLE" ] || fail "reinstall token role mismatch"
+    [ "$token_uuid" = "$system_uuid_hash" ] || fail "reinstall token hardware mismatch"
+    [ "$token_generation" = "$previous_generation" ] || fail "reinstall token generation mismatch"
+    [ "$token_authorize" = true ] || fail "reinstall token does not authorize erase"
+
+    [ "$mounted_enrollment" = false ] || umount "$enrollment_dir"
+}
+
+boot_parent_disk() {
+    source=$(awk '$2 == "/cdrom" { print $1; exit }' "$mounts_file")
+    case "$source" in
+        /dev/*) ;;
+        *) return 0 ;;
+    esac
+    name=${source#/dev/}
+    while [ -e "$sys_root/class/block/$name/partition" ]; do
+        name=$(basename "$(readlink -f "$sys_root/class/block/$name/..")")
+    done
+    printf '%s\n' "$name"
+}
+
+match_disk() {
+    disk_matches=0
+    matched_disk=
+    media_disk=$(boot_parent_disk)
+
+    for disk_path in "$sys_root"/class/block/*; do
+        disk=${disk_path##*/}
+        case "$disk" in
+            loop*|ram*|fd*|sr*|dm-*|md*) continue ;;
+        esac
+        [ ! -e "$disk_path/partition" ] || continue
+        [ "$(read_first_line "$disk_path/removable")" = 0 ] || continue
+        [ "$disk" != "$media_disk" ] || continue
+        [ -r "$disk_path/device/model" ] || continue
+        [ -r "$disk_path/device/serial" ] || continue
+
+        model_hash=$(hash_value "$(read_first_line "$disk_path/device/model")")
+        serial_hash=$(hash_value "$(read_first_line "$disk_path/device/serial")")
+        sectors=$(read_first_line "$disk_path/size")
+        case "$sectors" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        bytes=$((sectors * 512))
+
+        [ "$model_hash" = "$EXPECTED_DISK_MODEL_SHA256" ] || continue
+        [ "$serial_hash" = "$EXPECTED_DISK_SERIAL_SHA256" ] || continue
+        [ "$bytes" -ge "$EXPECTED_DISK_MIN_BYTES" ] || continue
+
+        disk_matches=$((disk_matches + 1))
+        matched_disk=/dev/$disk
+    done
+
+    [ "$disk_matches" -eq 1 ] || fail "disk matched $disk_matches targets; expected exactly one"
+    matched_name=${matched_disk#/dev/}
+    {
+        printf 'TARGET_DISK=%s\n' "$matched_disk"
+        printf 'TARGET_DISK_MODEL=%s\n' "$(read_first_line "$sys_root/class/block/$matched_name/device/model")"
+        printf 'TARGET_DISK_SERIAL=%s\n' "$(read_first_line "$sys_root/class/block/$matched_name/device/serial")"
+    } >> "$state_file"
+    set_debconf partman-auto/disk "$matched_disk"
+}
+
+case "${1:-}" in
+    identify)
+        match_node
+        ;;
+    select-disk)
+        match_node
+        match_disk
+        ;;
+    *)
+        fail "unknown gate phase"
+        ;;
+esac

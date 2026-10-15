@@ -1,0 +1,72 @@
+#!/bin/bash
+set -euo pipefail
+
+state_file=/etc/dns-appliance/install.env
+output_dir=/var/lib/dns-appliance
+metrics_dir=/var/lib/prometheus/node-exporter
+token_file=/var/lib/dns-appliance/secrets/technitium-static-token
+[ -s "$token_file" ] || { echo "dns-appliance-health: missing API token" >&2; exit 1; }
+token=$(cat "$token_file")
+ROLE=
+ADDRESS=
+while IFS='=' read -r key value; do
+    case "$key" in
+        ROLE) ROLE=$value ;;
+        ADDRESS) ADDRESS=$value ;;
+    esac
+done < "$state_file"
+
+probe() {
+    if "$@" >/dev/null 2>&1; then
+        printf '1'
+    else
+        printf '0'
+    fi
+}
+
+probe_technitium() {
+    curl --fail --silent --insecure --max-time 4 \
+        -H "Authorization: Bearer $token" \
+        https://127.0.0.1:53443/api/dnsClient/healthCheck |
+        jq -e '.status == "ok"'
+}
+
+dns_udp=$(probe dig +time=2 +tries=1 +short @127.0.0.1 localhost A)
+dns_tcp=$(probe dig +tcp +time=2 +tries=1 +short @127.0.0.1 localhost A)
+technitium=$(probe probe_technitium)
+cockpit=$(probe curl --fail --silent --insecure --max-time 4 https://127.0.0.1:9090/ping)
+time_sync=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || printf 'no')
+[ "$time_sync" = yes ] && ntp=1 || ntp=0
+tailscale_json=$(tailscale status --json 2>/dev/null || printf '{}')
+tailscale_state=$(printf '%s' "$tailscale_json" | jq -r '.BackendState // "Unavailable"')
+tailscale_ip=$(printf '%s' "$tailscale_json" | jq -r '.Self.TailscaleIPs[0] // ""')
+tailscale_hostname=$(printf '%s' "$tailscale_json" | jq -r '.Self.HostName // ""')
+tailscale_tags=$(printf '%s' "$tailscale_json" | jq -c '.Self.Tags // []')
+[ "$tailscale_state" = Running ] && tailscale=1 || tailscale=0
+
+install -d -m 0755 "$output_dir" "$metrics_dir"
+jq -n --arg hostname "$ROLE" --arg address "$ADDRESS" \
+    --argjson dns_udp "$dns_udp" --argjson dns_tcp "$dns_tcp" \
+    --argjson technitium "$technitium" --argjson cockpit "$cockpit" \
+    --argjson ntp "$ntp" --argjson tailscale "$tailscale" \
+    --arg tailscale_state "$tailscale_state" --arg tailscale_ip "$tailscale_ip" \
+    --arg tailscale_hostname "$tailscale_hostname" --argjson tailscale_tags "$tailscale_tags" \
+    --arg checked_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{hostname:$hostname,address:$address,dns_udp:$dns_udp,dns_tcp:$dns_tcp,technitium:$technitium,cockpit:$cockpit,ntp_synchronized:$ntp,tailscale:{up:$tailscale,state:$tailscale_state,ip:$tailscale_ip,hostname:$tailscale_hostname,tags:$tailscale_tags},checked_at:$checked_at}' \
+    > "$output_dir/health.json.tmp"
+mv "$output_dir/health.json.tmp" "$output_dir/health.json"
+
+{
+    printf '# HELP dns_appliance_service_up Service health (1 healthy, 0 unhealthy).\n'
+    printf '# TYPE dns_appliance_service_up gauge\n'
+    printf 'dns_appliance_service_up{service="dns_udp"} %s\n' "$dns_udp"
+    printf 'dns_appliance_service_up{service="dns_tcp"} %s\n' "$dns_tcp"
+    printf 'dns_appliance_service_up{service="technitium"} %s\n' "$technitium"
+    printf 'dns_appliance_service_up{service="cockpit"} %s\n' "$cockpit"
+    printf 'dns_appliance_service_up{service="ntp"} %s\n' "$ntp"
+    printf 'dns_appliance_service_up{service="tailscale"} %s\n' "$tailscale"
+} > "$metrics_dir/dns-appliance.prom.tmp"
+mv "$metrics_dir/dns-appliance.prom.tmp" "$metrics_dir/dns-appliance.prom"
+
+[ "$dns_udp" -eq 1 ] && [ "$dns_tcp" -eq 1 ] &&
+    [ "$technitium" -eq 1 ] && [ "$cockpit" -eq 1 ]

@@ -1,0 +1,148 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+composition=$repo_root/usb-media/composition.json
+collection=$(jq -er '.collection' "$composition")
+collection=$repo_root/$collection
+resolved=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
+
+usage() {
+    cat <<'EOF'
+Gujo Homelab OS Installer
+
+Usage:
+  ./device-os available                 List available catalog entries
+  ./device-os include <id>              Add an entry to the default USB
+  ./device-os exclude <id>              Remove an entry from the default USB
+  ./device-os plan                       Show contents and safety policy
+  ./device-os capacity [options]         Check a size or physical device
+  ./device-os simulate                   Run without downloads or disk writes
+  ./device-os prepare                    Download and verify selected images
+  sudo ./device-os write <options>       Flash a verified removable USB on Linux
+  sudo ./device-os write-image-macos <options>
+                                        Flash and verify a full-disk image on macOS
+
+The write options match usb-media/write-usb-linux. Flashing erases the selected
+USB and requires the exact target-specific --confirm phrase.
+
+macOS example:
+  sudo ./device-os write-image-macos \
+    --image /absolute/path/device-os.raw \
+    --device /dev/disk5 \
+    --confirm 'ERASE /dev/disk5 SanDisk 3.2Gen1 30784094208'
+
+Capacity examples:
+  ./device-os capacity
+  ./device-os capacity --capacity 16GB
+  ./device-os capacity --capacity 16GB \
+    --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
+    --runtime-manifest dns-appliance=/absolute/path/build-manifest.json
+EOF
+}
+
+fail() {
+    echo "Gujo Homelab OS Installer: $*" >&2
+    exit 1
+}
+
+command -v jq >/dev/null 2>&1 || fail "jq is required"
+
+resolve() {
+    "$repo_root/usb-media/resolve-catalog" >/dev/null
+}
+
+show_plan() {
+    resolve
+    echo "Gujo Homelab OS USB contents"
+    echo
+    jq -r '.entries[] |
+      "- [" +
+      (if .boot_behavior == "guarded-unattended" then "guarded unattended"
+       elif .boot_behavior == "interactive-installer" then "interactive installer"
+       else "live environment" end) +
+      "] " + .menu_alias' "$resolved"
+    echo
+    echo "USB label: $(jq -r '.usb.data_label' "$resolved")"
+    echo "Default boot-menu language: Korean"
+    echo "Catalog commit: $(jq -r '.catalog.revision' "$resolved")"
+    echo "Automatic menu timeout: disabled"
+    if jq -e '.entries[] | select(.profile_adapter == "dns-appliance")' "$resolved" >/dev/null; then
+        echo "DNS install gate: HP inventory, reinstall authorization, and internal disk must match"
+        echo "DNS enrollment partition: $(jq -r '.usb.enrollment_label' "$resolved")"
+    fi
+}
+
+command=${1:-help}
+case "$command" in
+    available)
+        resolve
+        selected=$(jq -c '.entries' "$collection")
+        catalog_root=${DEVICE_MEDIA_CATALOG_DIR:-$repo_root/cache/catalogs/$(jq -r '.catalog.revision' "$composition")}
+        index=$catalog_root/$(jq -r '.catalog.index' "$composition")
+        jq -r --argjson selected "$selected" '
+          .entries[] as $entry |
+          (if ($selected | index($entry.id)) then "[included] " else "[available] " end) + $entry.id
+        ' "$index"
+        ;;
+    include)
+        id=${2:-}
+        [ -n "$id" ] || fail "provide an entry ID to include"
+        resolve
+        catalog_root=${DEVICE_MEDIA_CATALOG_DIR:-$repo_root/cache/catalogs/$(jq -r '.catalog.revision' "$composition")}
+        index=$catalog_root/$(jq -r '.catalog.index' "$composition")
+        jq -e --arg id "$id" '.entries[] | select(.id == $id)' "$index" >/dev/null ||
+            fail "entry is not in the catalog: $id"
+        temporary=$(mktemp)
+        jq --arg id "$id" '.entries = ((.entries + [$id]) | unique)' "$collection" > "$temporary"
+        mv "$temporary" "$collection"
+        echo "Included: $id"
+        ;;
+    exclude)
+        id=${2:-}
+        [ -n "$id" ] || fail "provide an entry ID to exclude"
+        temporary=$(mktemp)
+        jq --arg id "$id" '.entries = [.entries[] | select(. != $id)]' "$collection" > "$temporary"
+        mv "$temporary" "$collection"
+        echo "Excluded: $id"
+        ;;
+    plan)
+        show_plan
+        ;;
+    capacity|size)
+        shift
+        resolve
+        USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/calculate-capacity" "$@"
+        ;;
+    simulate)
+        echo "[1/4] Resolve the pinned catalog."
+        resolve
+        echo "[2/4] Combine selected entries and local profiles."
+        show_plan
+        echo
+        echo "[3/4] Image download and SHA-256 verification: skipped"
+        echo "[4/4] USB erase and flash: skipped"
+        echo
+        echo "Simulation complete: no network image or disk was changed."
+        ;;
+    prepare)
+        resolve
+        USB_MEDIA_CATALOG=$resolved "$repo_root/usb-media/fetch-images"
+        ;;
+    write)
+        shift
+        resolve
+        USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/write-usb-linux" "$@"
+        ;;
+    write-image-macos)
+        shift
+        exec "$repo_root/usb-media/write-image-macos" "$@"
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac

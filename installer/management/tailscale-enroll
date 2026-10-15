@@ -1,0 +1,171 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+tag=${TAILSCALE_DEVICE_TAG:-tag:dns-appliance}
+ssh_user=${TAILSCALE_SSH_USER:-operator}
+client_id_file=${TAILSCALE_OAUTH_CLIENT_ID_FILE:-}
+client_secret_file=${TAILSCALE_OAUTH_CLIENT_SECRET_FILE:-}
+requested_role=
+
+usage() {
+    echo "usage: $0 (--all | --role dns01|dns02|dns03)" >&2
+    echo "set TAILSCALE_OAUTH_CLIENT_ID_FILE and TAILSCALE_OAUTH_CLIENT_SECRET_FILE" >&2
+    exit 2
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --all) requested_role=all; shift ;;
+        --role) requested_role=${2:-}; shift 2 ;;
+        *) usage ;;
+    esac
+done
+
+case "$requested_role" in
+    all|dns01|dns02|dns03) ;;
+    *) usage ;;
+esac
+
+fail() {
+    echo "tailscale-enroll: $*" >&2
+    exit 1
+}
+
+for command in curl jq ssh; do
+    command -v "$command" >/dev/null 2>&1 || fail "$command is required"
+done
+[ -r "$client_id_file" ] || fail "OAuth client ID file is missing"
+[ -r "$client_secret_file" ] || fail "OAuth client secret file is missing"
+
+client_id=$(sed -n '1p' "$client_id_file")
+client_secret=$(sed -n '1p' "$client_secret_file")
+printf '%s' "$client_id" | grep -Eq '^[A-Za-z0-9_-]+$' || fail "invalid OAuth client ID"
+printf '%s' "$client_secret" | grep -Eq '^tskey-client-[A-Za-z0-9_-]+$' ||
+    fail "invalid OAuth client secret"
+printf '%s' "$tag" | grep -Eq '^tag:[A-Za-z0-9_-]+$' || fail "invalid device tag"
+
+oauth_response=$(
+    {
+        printf 'data-urlencode = "client_id=%s"\n' "$client_id"
+        printf 'data-urlencode = "client_secret=%s"\n' "$client_secret"
+        printf 'data = "grant_type=client_credentials"\n'
+    } | curl --config - --fail --silent --show-error \
+        https://api.tailscale.com/api/v2/oauth/token
+) || fail "OAuth token request failed"
+oauth_token=$(printf '%s' "$oauth_response" | jq -er '.access_token | select(length > 0)') ||
+    fail "OAuth response did not contain an access token"
+unset oauth_response client_secret
+
+current_key_id=
+revoke_current_key() {
+    [ -n "$current_key_id" ] || return 0
+    printf 'header = "Authorization: Bearer %s"\n' "$oauth_token" |
+        curl --config - --fail --silent --show-error --request DELETE \
+            "https://api.tailscale.com/api/v2/tailnet/-/keys/$current_key_id" \
+            >/dev/null 2>&1 || true
+    current_key_id=
+}
+cleanup() {
+    revoke_current_key
+    unset oauth_token
+}
+trap cleanup EXIT HUP INT TERM
+
+status_for() {
+    host=$1
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$ssh_user@$host" \
+        sudo tailscale status --json 2>/dev/null || printf '{}'
+}
+
+verify_status() {
+    role=$1
+    status=$2
+    printf '%s' "$status" | jq -e --arg role "$role" --arg tag "$tag" '
+        .BackendState == "Running" and
+        .Self.HostName == $role and
+        (.Self.TailscaleIPs[0] | type == "string") and
+        (.Self.Tags | index($tag) != null)
+    ' >/dev/null || fail "$role joined with unexpected hostname, state, address, or tag"
+}
+
+verify_preferences() {
+    role=$1
+    host=$2
+    preferences=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$ssh_user@$host" \
+        sudo tailscale debug prefs 2>/dev/null) ||
+        fail "could not read Tailscale preferences from $role"
+    printf '%s' "$preferences" | jq -e '
+        .WantRunning == true and
+        .CorpDNS == false and
+        .RouteAll == false and
+        .RunSSH == false and
+        ((.AdvertiseRoutes // []) | length == 0) and
+        ((.ExitNodeID // "") == "") and
+        ((.ExitNodeIP // "") == "")
+    ' >/dev/null || fail "$role has unexpected DNS, route, exit-node, or SSH preferences"
+}
+
+mint_key() {
+    role=$1
+    payload=$(jq -cn --arg tag "$tag" --arg description "$role DNS appliance bootstrap" '{
+        capabilities:{devices:{create:{reusable:false,ephemeral:false,preauthorized:true,tags:[$tag]}}},
+        expirySeconds:3600,
+        description:$description
+    }')
+    response=$(
+        printf 'header = "Authorization: Bearer %s"\n' "$oauth_token" |
+            curl --config - --fail --silent --show-error \
+                -H 'Content-Type: application/json' \
+                --data-binary "$payload" \
+                https://api.tailscale.com/api/v2/tailnet/-/keys
+    ) || fail "could not mint a one-off auth key for $role"
+    current_key_id=$(printf '%s' "$response" | jq -er '.id | select(length > 0)') ||
+        fail "auth-key response for $role did not contain an ID"
+    minted_key=$(printf '%s' "$response" | jq -er '.key | select(startswith("tskey-auth-"))') ||
+        fail "auth-key response for $role did not contain a key"
+}
+
+enroll_one() {
+    role=$1
+    host=$2
+    before=$(status_for "$host")
+    if printf '%s' "$before" | jq -e '.BackendState == "Running"' >/dev/null 2>&1; then
+        verify_status "$role" "$before"
+        verify_preferences "$role" "$host"
+        ip=$(printf '%s' "$before" | jq -r '.Self.TailscaleIPs[0]')
+        echo "tailscale-enroll: $role already enrolled at $ip"
+        return 0
+    fi
+
+    mint_key "$role"
+    auth_key=$minted_key
+    unset minted_key
+    remote_command="set -eu; temporary=\$(mktemp /tmp/tailscale-auth.XXXXXX); trap 'rm -f \"\$temporary\"' EXIT HUP INT TERM; chmod 0600 \"\$temporary\"; cat > \"\$temporary\"; sudo tailscale up --auth-key=\"file:\$temporary\" --hostname=$role --accept-dns=false --accept-routes=false --advertise-exit-node=false --ssh=false --advertise-tags=$tag --timeout=90s"
+    printf '%s\n' "$auth_key" |
+        ssh -o BatchMode=yes -o ConnectTimeout=10 "$ssh_user@$host" "$remote_command" \
+        >/dev/null || fail "remote Tailscale enrollment failed for $role"
+    unset auth_key remote_command
+    revoke_current_key
+
+    after=$(status_for "$host")
+    verify_status "$role" "$after"
+    verify_preferences "$role" "$host"
+    ip=$(printf '%s' "$after" | jq -r '.Self.TailscaleIPs[0]')
+    if command -v tailscale >/dev/null 2>&1; then
+        tailscale ping --timeout=5s "$ip" >/dev/null ||
+            fail "$role joined but is not reachable from this management host"
+    fi
+    echo "tailscale-enroll: enrolled and verified $role at $ip"
+}
+
+case "$requested_role" in
+    all)
+        enroll_one dns01 10.0.5.1
+        enroll_one dns02 10.0.5.2
+        enroll_one dns03 10.0.5.3
+        ;;
+    dns01) enroll_one dns01 10.0.5.1 ;;
+    dns02) enroll_one dns02 10.0.5.2 ;;
+    dns03) enroll_one dns03 10.0.5.3 ;;
+esac

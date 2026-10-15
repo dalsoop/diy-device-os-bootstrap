@@ -1,0 +1,57 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+catalog=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
+cache_dir=${USB_MEDIA_CACHE_DIR:-$repo_root/cache/usb-media}
+
+fail() {
+    echo "usb-media fetch-images: $*" >&2
+    exit 1
+}
+
+for command in curl jq sha256sum; do
+    command -v "$command" >/dev/null 2>&1 || fail "$command is required"
+done
+[ -r "$catalog" ] || fail "resolved catalog is missing; run ./device-os plan"
+"$script_dir/verify-catalog" "$catalog" >/dev/null
+mkdir -p "$cache_dir"
+
+fetch() {
+    filename=$1
+    url=$2
+    expected=$3
+    destination=$cache_dir/$filename
+    if [ ! -s "$destination" ]; then
+        partial=$destination.partial
+        rm -f "$partial"
+        curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$partial" "$url" || {
+                rm -f "$partial"
+                fail "download failed: $url"
+            }
+        printf '%s  %s\n' "$expected" "$partial" | sha256sum -c - || {
+            rm -f "$partial"
+            fail "checksum mismatch: $filename"
+        }
+        mv "$partial" "$destination"
+    fi
+    printf '%s  %s\n' "$expected" "$destination" | sha256sum -c - >/dev/null ||
+        fail "cached checksum mismatch: $filename"
+}
+
+source_list=$(mktemp)
+trap 'rm -f "$source_list"' EXIT HUP INT TERM
+jq -r '
+  ([.bootloader.source] + [.entries[].source | select(.kind == "locked-download")])[] |
+  [.filename, .url, .sha256] | @tsv
+' "$catalog" > "$source_list"
+
+tab=$(printf '\t')
+while IFS="$tab" read -r filename url sha256; do
+    [ -n "$filename" ] || continue
+    fetch "$filename" "$url" "$sha256"
+done < "$source_list"
+
+echo "usb-media fetch-images: verified catalog cache at $cache_dir"

@@ -1,0 +1,155 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+credentials_dir=${DNS_CLUSTER_CREDENTIALS_DIR:-}
+output=${DNS_CLUSTER_ACCESS_OUTPUT:-}
+recipient_file=${DNS_CLUSTER_AGE_RECIPIENT:-$repo_root/installer/inputs/age-recipient}
+cluster_domain=${DNS_CLUSTER_DOMAIN:-dns-cluster.home.arpa}
+zone_file=${DNS_CLUSTER_ZONE_FILE:-$repo_root/zones/home.arpa.zone}
+
+usage() {
+    echo "usage: DNS_CLUSTER_CREDENTIALS_DIR=/secure/dir DNS_CLUSTER_ACCESS_OUTPUT=/secure/cluster-access.json.age $0" >&2
+    exit 2
+}
+
+if ! { [ -n "$credentials_dir" ] && [ -d "$credentials_dir" ]; }; then
+    usage
+fi
+[ -n "$output" ] || usage
+[ ! -e "$output" ] || { echo "cluster-bootstrap: output already exists: $output" >&2; exit 1; }
+[ -r "$recipient_file" ] || { echo "cluster-bootstrap: missing age recipient" >&2; exit 1; }
+[ -r "$zone_file" ] || { echo "cluster-bootstrap: missing zone file" >&2; exit 1; }
+install -d -m 0700 "$(dirname "$output")"
+
+recipient=$(awk '!/^[[:space:]]*(#|$)/ { print; exit }' "$recipient_file")
+printf '%s' "$recipient" | grep -Eq '^age1[0-9a-z]{58}$' || {
+    echo "cluster-bootstrap: invalid age recipient" >&2
+    exit 1
+}
+
+for role in dns01 dns02 dns03; do
+    [ -s "$credentials_dir/$role-admin-password" ] || {
+        echo "cluster-bootstrap: missing $credentials_dir/$role-admin-password" >&2
+        exit 1
+    }
+done
+
+declare -A address=( [dns01]=10.0.5.1 [dns02]=10.0.5.2 [dns03]=10.0.5.3 )
+declare -A token
+
+api() {
+    role=$1
+    method=$2
+    path=$3
+    shift 3
+    response=$(curl --fail --silent --show-error --insecure \
+        -X "$method" -H "Authorization: Bearer ${token[$role]}" \
+        "https://${address[$role]}:53443$path" "$@")
+    status=$(jq -r '.status // empty' <<<"$response")
+    [ "$status" = ok ] || {
+        echo "cluster-bootstrap: $role $path failed" >&2
+        jq -c '{status,errorMessage}' <<<"$response" >&2 || true
+        return 1
+    }
+    printf '%s' "$response"
+}
+
+for role in dns01 dns02 dns03; do
+    password=$(cat "$credentials_dir/$role-admin-password")
+    response=$(curl --fail --silent --show-error --insecure \
+        -X POST --data-urlencode user=admin --data-urlencode pass="$password" \
+        --data-urlencode tokenName="cluster-bootstrap-$role" \
+        "https://${address[$role]}:53443/api/user/createToken")
+    token[$role]=$(jq -er '.token' <<<"$response")
+done
+
+primary_state=$(api dns01 GET '/api/admin/cluster/state?includeServerIpAddresses=true')
+if [ "$(jq -r '.response.clusterInitialized' <<<"$primary_state")" != true ]; then
+    api dns01 POST '/api/admin/cluster/init' \
+        --data-urlencode "clusterDomain=$cluster_domain" \
+        --data-urlencode "primaryNodeIpAddresses=${address[dns01]}" >/dev/null
+fi
+
+primary_password=$(cat "$credentials_dir/dns01-admin-password")
+for role in dns02 dns03; do
+    state=$(api "$role" GET '/api/admin/cluster/state?includeServerIpAddresses=true')
+    if [ "$(jq -r '.response.clusterInitialized' <<<"$state")" != true ]; then
+        api "$role" POST '/api/admin/cluster/initJoin' \
+            --data-urlencode "secondaryNodeIpAddresses=${address[$role]}" \
+            --data-urlencode "primaryNodeUrl=https://dns01.$cluster_domain:53443/" \
+            --data-urlencode "primaryNodeIpAddress=${address[dns01]}" \
+            --data-urlencode 'ignoreCertificateErrors=true' \
+            --data-urlencode 'primaryNodeUsername=admin' \
+            --data-urlencode "primaryNodePassword=$primary_password" >/dev/null
+    fi
+done
+
+catalog=cluster-catalog.$cluster_domain
+zones=$(api dns01 GET '/api/zones/list')
+if ! jq -e --arg zone home.arpa '.response.zones[]? | select(.name == $zone)' <<<"$zones" >/dev/null; then
+    api dns01 POST '/api/zones/create' \
+        --data-urlencode 'zone=home.arpa' --data-urlencode 'type=Primary' \
+        --data-urlencode "catalog=$catalog" >/dev/null
+fi
+api dns01 POST '/api/zones/import?zone=home.arpa&overwrite=true&overwriteZone=true' \
+    -F "file=@$zone_file;type=text/plain" >/dev/null
+
+create_user_if_missing() {
+    user=$1
+    users=$(api dns01 GET '/api/admin/users/list')
+    if ! jq -e --arg user "$user" '.response.users[]? | select(.username == $user)' <<<"$users" >/dev/null; then
+        password=$(openssl rand -base64 36 | tr -d '\n')
+        api dns01 POST '/api/admin/users/create' \
+            --data-urlencode "user=$user" --data-urlencode "pass=$password" \
+            --data-urlencode "displayName=$user" >/dev/null
+    fi
+}
+
+for user in agent-dns-reader agent-dns-planner agent-dns-applier; do
+    create_user_if_missing "$user"
+done
+
+readonly_permissions='agent-dns-reader|true|false|false|agent-dns-planner|true|false|false|agent-dns-applier|true|false|false'
+set_section_permissions() {
+    section=$1
+    users=$2
+    details=$(api dns01 GET "/api/admin/permissions/get?section=$section&includeUsersAndGroups=true")
+    groups=$(jq -r '[.response.groupPermissions[]? | [.name,(.canView|tostring),(.canModify|tostring),(.canDelete|tostring)] | join("|")] | join("|")' <<<"$details")
+    api dns01 POST '/api/admin/permissions/set' \
+        --data-urlencode "section=$section" \
+        --data-urlencode "userPermissions=$users" \
+        --data-urlencode "groupPermissions=$groups" >/dev/null
+}
+for section in Dashboard Cache Allowed Blocked Apps DnsClient Settings Logs; do
+    set_section_permissions "$section" "$readonly_permissions"
+done
+set_section_permissions Zones \
+    'agent-dns-reader|true|false|false|agent-dns-planner|true|false|false|agent-dns-applier|true|true|false'
+
+access_tmp=$(mktemp)
+trap 'rm -f "$access_tmp" "$output.partial"' EXIT HUP INT TERM
+jq -n --arg cluster_domain "$cluster_domain" \
+    '{schema_version:1,cluster_domain:$cluster_domain,created_at:(now|todate),tokens:{}}' > "$access_tmp"
+for user in agent-dns-reader agent-dns-planner agent-dns-applier; do
+    response=$(api dns01 POST '/api/admin/sessions/createToken' \
+        --data-urlencode "user=$user" --data-urlencode "tokenName=git-managed-$user")
+    value=$(jq -er '.response.token' <<<"$response")
+    jq --arg user "$user" --arg value "$value" '.tokens[$user]=$value' \
+        "$access_tmp" > "$access_tmp.next"
+    mv "$access_tmp.next" "$access_tmp"
+done
+age -r "$recipient" -o "$output.partial" "$access_tmp"
+mv "$output.partial" "$output"
+trap - EXIT HUP INT TERM
+
+for role in dns01 dns02 dns03; do
+    dig +time=2 +tries=1 +short "@${address[$role]}" canary.home.arpa A |
+        grep -qx '10.0.9.9' || {
+            echo "cluster-bootstrap: $role canary probe failed" >&2
+            exit 1
+        }
+done
+
+echo "cluster bootstrap complete; encrypted access bundle: $output"

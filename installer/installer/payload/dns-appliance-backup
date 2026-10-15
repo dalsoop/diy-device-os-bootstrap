@@ -1,0 +1,31 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+recipient=$(awk '!/^[[:space:]]*(#|$)/ { print; exit }' /etc/dns-appliance/age-recipient)
+token_file=/var/lib/dns-appliance/secrets/technitium-static-token
+[ -s "$token_file" ] || { echo "dns-appliance-backup: missing API token" >&2; exit 1; }
+token=$(cat "$token_file")
+
+backup_dir=/var/backups/dns-appliance
+install -d -m 0700 "$backup_dir"
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+hostname=$(hostname -s)
+output=$backup_dir/$hostname-technitium-$stamp.zip.age
+partial=$output.partial
+plain=$(mktemp /var/tmp/dns-appliance-backup.XXXXXX.zip)
+trap 'rm -f "$plain" "$partial"' EXIT HUP INT TERM
+
+curl --fail --silent --show-error --insecure \
+    -H "Authorization: Bearer $token" \
+    'https://127.0.0.1:53443/api/settings/backup?blockLists=true&logs=false&scopes=false&apps=true&stats=false&zones=true&allowedZones=true&blockedZones=true&dnsSettings=true&logSettings=true&authConfig=true' \
+    -o "$plain"
+unzip -t "$plain" >/dev/null
+age -r "$recipient" -o "$partial" "$plain"
+
+[ -s "$partial" ] || { echo "dns-appliance-backup: empty encrypted backup" >&2; exit 1; }
+mv "$partial" "$output"
+rm -f "$plain"
+trap - EXIT HUP INT TERM
+find "$backup_dir" -maxdepth 1 -type f -name "$hostname-technitium-*.zip.age" -mtime +30 -delete
+echo "$output"

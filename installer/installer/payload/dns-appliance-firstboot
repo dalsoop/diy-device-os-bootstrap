@@ -1,0 +1,285 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+install_state=/etc/dns-appliance/install.env
+source_lock=/etc/dns-appliance/sources.env
+state_dir=/var/lib/dns-appliance
+secret_dir=$state_dir/secrets
+technitium_dir=/var/lib/technitium
+technitium_log_dir=/var/log/technitium
+image_archive=/usr/lib/dns-appliance/technitium.oci.tar
+schema=/usr/share/dns-appliance/enrollment-record.schema.json
+age_recipient_file=/etc/dns-appliance/age-recipient
+mount_point=/mnt/dns-enroll
+
+fail() {
+    echo "dns-appliance-firstboot: $*" >&2
+    exit 1
+}
+
+[ -r "$install_state" ] || fail "missing $install_state"
+[ -r "$source_lock" ] || fail "missing $source_lock"
+[ -r "$age_recipient_file" ] || fail "missing $age_recipient_file"
+[ -s "$image_archive" ] || fail "missing pinned Technitium OCI archive"
+[ -r "$schema" ] || fail "missing enrollment schema"
+
+ROLE=
+ADDRESS=
+DOMAIN=
+LAN_CIDR=
+MANAGEMENT_CIDR=
+CLUSTER_DOMAIN=
+NIC_NAME=
+NIC_MAC=
+TARGET_DISK=
+TARGET_DISK_MODEL=
+TARGET_DISK_SERIAL=
+while IFS='=' read -r key value; do
+    case "$key" in
+        ROLE) ROLE=$value ;;
+        ADDRESS) ADDRESS=$value ;;
+        DOMAIN) DOMAIN=$value ;;
+        LAN_CIDR) LAN_CIDR=$value ;;
+        MANAGEMENT_CIDR) MANAGEMENT_CIDR=$value ;;
+        CLUSTER_DOMAIN) CLUSTER_DOMAIN=$value ;;
+        NIC_NAME) NIC_NAME=$value ;;
+        NIC_MAC) NIC_MAC=$value ;;
+        TARGET_DISK) TARGET_DISK=$value ;;
+        TARGET_DISK_MODEL) TARGET_DISK_MODEL=$value ;;
+        TARGET_DISK_SERIAL) TARGET_DISK_SERIAL=$value ;;
+    esac
+done < "$install_state"
+for value in "$ROLE" "$ADDRESS" "$DOMAIN" "$LAN_CIDR" "$MANAGEMENT_CIDR" \
+    "$CLUSTER_DOMAIN" "$NIC_NAME" "$TARGET_DISK"; do
+    [ -n "$value" ] || fail "install state is incomplete"
+done
+for value in "$NIC_MAC" "$TARGET_DISK_MODEL" "$TARGET_DISK_SERIAL"; do
+    [ -n "$value" ] || fail "install-time hardware identity is incomplete"
+done
+# shellcheck source=/dev/null
+. "$source_lock"
+
+recipient=$(awk '!/^[[:space:]]*(#|$)/ { print; exit }' "$age_recipient_file")
+printf '%s' "$recipient" | grep -Eq '^age1[0-9a-z]{58}$' || fail "invalid age recipient"
+
+install -d -m 0700 "$state_dir" "$secret_dir" "$technitium_dir" "$technitium_log_dir"
+install -d -m 0755 /etc/dns-appliance /usr/share/dns-appliance
+
+generation_file=$state_dir/generation-id
+if [ ! -s "$generation_file" ]; then
+    uuidgen > "$generation_file.tmp"
+    mv "$generation_file.tmp" "$generation_file"
+fi
+generation=$(sed -n '1p' "$generation_file")
+
+generate_secret() {
+    destination=$1
+    kind=$2
+    [ -s "$destination" ] && return 0
+    case "$kind" in
+        password) openssl rand -base64 36 | tr -d '\n' > "$destination.tmp" ;;
+        token) openssl rand -hex 64 > "$destination.tmp" ;;
+        *) fail "unknown secret type $kind" ;;
+    esac
+    chmod 0600 "$destination.tmp"
+    mv "$destination.tmp" "$destination"
+}
+
+operator_password=$secret_dir/operator-password
+technitium_password=$secret_dir/technitium-admin-password
+technitium_token=$secret_dir/technitium-static-token
+generate_secret "$technitium_token" token
+credentials_archived=$state_dir/credentials-archived
+include_bootstrap_password=true
+if [ -s "$credentials_archived" ]; then
+    include_bootstrap_password=false
+else
+    generate_secret "$operator_password" password
+    generate_secret "$technitium_password" password
+    printf 'operator:%s\n' "$(cat "$operator_password")" | chpasswd
+fi
+
+if ! /usr/bin/podman image exists "$TECHNITIUM_IMAGE:$TECHNITIUM_VERSION"; then
+    /usr/bin/podman load -i "$image_archive"
+fi
+/usr/bin/podman image exists "$TECHNITIUM_IMAGE:$TECHNITIUM_VERSION" ||
+    fail "pinned Technitium image did not load with the expected tag"
+
+write_technitium_env() {
+    include_password=$1
+    env_tmp=/etc/dns-appliance/technitium.env.tmp
+    {
+        printf 'DNS_SERVER_DOMAIN=%s.%s\n' "$ROLE" "$CLUSTER_DOMAIN"
+        if [ "$include_password" = true ]; then
+            printf 'DNS_SERVER_ADMIN_PASSWORD_FILE=/run/dns-appliance-secrets/technitium-admin-password\n'
+        fi
+        printf 'DNS_SERVER_AUTH_STATIC_SESSIONS=admin:%s\n' "$(cat "$technitium_token")"
+        printf 'DNS_SERVER_PREFER_IPV6=false\n'
+        printf 'DNS_SERVER_WEB_SERVICE_LOCAL_ADDRESSES=127.0.0.1,%s\n' "$ADDRESS"
+        printf 'DNS_SERVER_WEB_SERVICE_HTTP_PORT=5380\n'
+        printf 'DNS_SERVER_WEB_SERVICE_HTTPS_PORT=53443\n'
+        printf 'DNS_SERVER_WEB_SERVICE_ENABLE_HTTPS=true\n'
+        printf 'DNS_SERVER_WEB_SERVICE_USE_SELF_SIGNED_CERT=true\n'
+        printf 'DNS_SERVER_WEB_SERVICE_HTTP_TO_TLS_REDIRECT=true\n'
+        printf 'DNS_SERVER_RECURSION=UseSpecifiedNetworkACL\n'
+        printf 'DNS_SERVER_RECURSION_NETWORK_ACL=127.0.0.0/8,%s\n' "$LAN_CIDR"
+        printf 'DNS_SERVER_LOG_USING_LOCAL_TIME=false\n'
+        printf 'DNS_SERVER_LOG_FOLDER_PATH=/var/log/technitium/dns\n'
+        printf 'DNS_SERVER_LOG_MAX_LOG_FILE_DAYS=30\n'
+        printf 'DNS_SERVER_STATS_MAX_STAT_FILE_DAYS=30\n'
+    } > "$env_tmp"
+    chmod 0600 "$env_tmp"
+    mv "$env_tmp" /etc/dns-appliance/technitium.env
+}
+
+write_technitium_env "$include_bootstrap_password"
+systemctl mask systemd-resolved.service >/dev/null 2>&1 || true
+systemctl enable --now cockpit.socket nftables.service prometheus-node-exporter.service
+systemctl enable --now systemd-timesyncd.service || true
+systemctl enable --now tailscaled.service
+systemctl enable --now technitium-dns.service
+
+wait_for() {
+    name=$1
+    shift
+    for _attempt in $(seq 1 60); do
+        if "$@" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    fail "$name did not become healthy"
+}
+
+technitium_health() {
+    curl --fail --silent --show-error --insecure \
+        -H "Authorization: Bearer $(cat "$technitium_token")" \
+        https://127.0.0.1:53443/api/dnsClient/healthCheck |
+        jq -e '.status == "ok"'
+}
+
+wait_for technitium-api technitium_health
+wait_for dns-udp dig +time=2 +tries=1 +short @127.0.0.1 localhost A
+wait_for dns-tcp dig +tcp +time=2 +tries=1 +short @127.0.0.1 localhost A
+wait_for cockpit curl --fail --silent --show-error --insecure https://127.0.0.1:9090/ping
+
+printf 'search %s\nnameserver 127.0.0.1\n' "$DOMAIN" > /etc/resolv.conf.tmp
+chmod 0644 /etc/resolv.conf.tmp
+mv /etc/resolv.conf.tmp /etc/resolv.conf
+
+enrollment_device=$(blkid -L DNS-ENROLL 2>/dev/null || true)
+[ -n "$enrollment_device" ] || fail "DNS-ENROLL partition is not attached"
+install -d -m 0700 "$mount_point"
+if ! mountpoint -q "$mount_point"; then
+    mount -o nodev,nosuid,noexec,umask=0077 "$enrollment_device" "$mount_point"
+fi
+
+installer_json=$mount_point/installer.json
+[ -r "$installer_json" ] || fail "DNS-ENROLL is missing installer.json"
+image_sha256=$(jq -er '.image_sha256 | select(test("^[a-f0-9]{64}$"))' "$installer_json")
+build_id=$(jq -er '.build_id | select(length > 0)' "$installer_json")
+
+role_type=secondary
+[ "$ROLE" = dns01 ] && role_type=primary
+
+read_one() {
+    sed -n '1p' "$1" 2>/dev/null || true
+}
+
+ssh_fingerprints=$(for key in /etc/ssh/ssh_host_*_key.pub; do
+    [ -r "$key" ] || continue
+    ssh-keygen -E sha256 -lf "$key" | awk '{print $2}'
+done | jq -Rsc 'split("\n") | map(select(length > 0))')
+
+certificate_fingerprint() {
+    port=$1
+    echo | openssl s_client -connect "127.0.0.1:$port" -servername "$ROLE.$DOMAIN" 2>/dev/null |
+        openssl x509 -noout -fingerprint -sha256 2>/dev/null |
+        sed 's/^sha256 Fingerprint=//I; s/://g' | tr '[:upper:]' '[:lower:]'
+}
+cockpit_fingerprint=$(certificate_fingerprint 9090)
+technitium_fingerprint=$(certificate_fingerprint 53443)
+[ -n "$cockpit_fingerprint" ] || fail "could not read Cockpit certificate"
+[ -n "$technitium_fingerprint" ] || fail "could not read Technitium certificate"
+
+completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+ntp_status=degraded-offline
+[ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)" = yes ] && ntp_status=healthy
+final=$mount_point/records/$ROLE/$generation
+if [ -s "$final/COMPLETE" ] && [ -s "$final/public.json" ] && [ -s "$final/recovery.tar.age" ]; then
+    python3 -c 'import json,sys,jsonschema; jsonschema.validate(json.load(open(sys.argv[2])), json.load(open(sys.argv[1])))' \
+        "$schema" "$final/public.json"
+    printf '%s\n' "$generation" > "$mount_point/records/$ROLE/ACTIVE.tmp"
+    mv "$mount_point/records/$ROLE/ACTIVE.tmp" "$mount_point/records/$ROLE/ACTIVE"
+    sync -f "$mount_point"
+    write_technitium_env false
+    printf '%s\n' "$generation" > "$credentials_archived"
+    rm -f "$technitium_password" "$operator_password"
+    printf '%s\n' "$completed_at" > "$state_dir/COMPLETE"
+    echo "dns-appliance-firstboot: recovered completed enrollment for $ROLE generation $generation"
+    exit 0
+fi
+
+stage=$mount_point/.partial-$ROLE-$generation-$$
+cleanup_stage() {
+    if [ -n "${stage:-}" ] && [ -d "$stage" ]; then
+        rm -rf -- "$stage"
+    fi
+}
+trap cleanup_stage EXIT HUP INT TERM
+install -d -m 0700 "$stage" "$mount_point/records/$ROLE"
+
+jq -n \
+    --arg generation_id "$generation" \
+    --arg hostname "$ROLE" \
+    --arg role "$role_type" \
+    --arg address "$ADDRESS" \
+    --arg product_name "$(read_one /sys/class/dmi/id/product_name)" \
+    --arg product_number "$(read_one /sys/class/dmi/id/product_sku)" \
+    --arg system_serial "$(read_one /sys/class/dmi/id/product_serial)" \
+    --arg system_uuid "$(read_one /sys/class/dmi/id/product_uuid)" \
+    --arg mac "$NIC_MAC" \
+    --arg disk_model "$TARGET_DISK_MODEL" \
+    --arg disk_serial "$TARGET_DISK_SERIAL" \
+    --arg build_id "$build_id" \
+    --arg image_sha256 "$image_sha256" \
+    --argjson ssh_host_key_fingerprints "$ssh_fingerprints" \
+    --arg cockpit_fingerprint "$cockpit_fingerprint" \
+    --arg technitium_fingerprint "$technitium_fingerprint" \
+    --arg ntp_status "$ntp_status" \
+    --arg completed_at "$completed_at" \
+    '{schema_version:1,generation_id:$generation_id,hostname:$hostname,role:$role,address:$address,hardware:{product_name:$product_name,product_number:$product_number,system_serial:$system_serial,system_uuid:$system_uuid,mac:$mac,disk_model:$disk_model,disk_serial:$disk_serial},installer:{build_id:$build_id,image_sha256:$image_sha256},ssh_host_key_fingerprints:$ssh_host_key_fingerprints,certificate_fingerprints:[$cockpit_fingerprint,$technitium_fingerprint],health:{dns_udp:"healthy",dns_tcp:"healthy",technitium:"healthy",cockpit:"healthy",ntp:$ntp_status,cluster:"standalone",ipv6_policy:"disabled"},completed_at:$completed_at}' \
+    > "$stage/public.json"
+
+python3 -c 'import json,sys,jsonschema; jsonschema.validate(json.load(open(sys.argv[2])), json.load(open(sys.argv[1])))' \
+    "$schema" "$stage/public.json"
+
+recovery_list=$state_dir/recovery-files.txt
+printf '%s\n' \
+    secrets/operator-password \
+    secrets/technitium-admin-password \
+    secrets/technitium-static-token \
+    generation-id > "$recovery_list"
+tar -C "$state_dir" -cf - -T "$recovery_list" |
+    age -r "$recipient" -o "$stage/recovery.tar.age"
+journalctl -u dns-appliance-firstboot.service --no-pager -n 500 > "$stage/install.log" || true
+printf '%s\n' "$completed_at" > "$stage/COMPLETE"
+sync -f "$stage"
+
+[ ! -e "$final" ] || fail "enrollment generation already exists: $final"
+mv "$stage" "$final"
+stage=
+printf '%s\n' "$generation" > "$mount_point/records/$ROLE/ACTIVE.tmp"
+mv "$mount_point/records/$ROLE/ACTIVE.tmp" "$mount_point/records/$ROLE/ACTIVE"
+sync -f "$mount_point"
+
+write_technitium_env false
+printf '%s\n' "$generation" > "$credentials_archived"
+rm -f "$technitium_password" "$operator_password" "$recovery_list"
+printf '%s\n' "$completed_at" > "$state_dir/COMPLETE"
+systemctl enable dns-appliance-health.timer dns-appliance-backup.timer
+systemctl start dns-appliance-health.timer dns-appliance-backup.timer
+trap - EXIT HUP INT TERM
+
+echo "dns-appliance-firstboot: enrollment complete for $ROLE generation $generation"

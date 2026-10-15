@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+# shellcheck disable=SC1091
+. "$repo_root/build/locks/sources.env"
+
+cache_dir=${DNS_APPLIANCE_CACHE_DIR:-$repo_root/cache}
+archive=$cache_dir/technitium-dns-$TECHNITIUM_VERSION-amd64.oci.tar
+image_ref=$TECHNITIUM_IMAGE@$TECHNITIUM_AMD64_DIGEST
+tailscale_archive=$cache_dir/tailscale-$TAILSCALE_VERSION-amd64.tgz
+
+fail() {
+    echo "fetch-locked-sources: $*" >&2
+    exit 1
+}
+
+command -v skopeo >/dev/null 2>&1 || fail "skopeo is required"
+command -v curl >/dev/null 2>&1 || fail "curl is required"
+mkdir -p "$cache_dir"
+
+remote_digest=$(skopeo inspect --override-os linux --override-arch amd64 \
+    --format '{{.Digest}}' "docker://$image_ref")
+[ "$remote_digest" = "$TECHNITIUM_AMD64_DIGEST" ] ||
+    fail "Technitium digest mismatch: $remote_digest"
+
+if [ ! -s "$archive" ]; then
+    partial=$archive.partial
+    trap 'rm -f "$partial"' EXIT HUP INT TERM
+    skopeo copy --override-os linux --override-arch amd64 \
+        "docker://$image_ref" "oci-archive:$partial:$TECHNITIUM_IMAGE:$TECHNITIUM_VERSION"
+    mv "$partial" "$archive"
+    trap - EXIT HUP INT TERM
+fi
+
+archive_digest=$(skopeo inspect --format '{{.Digest}}' "oci-archive:$archive")
+[ "$archive_digest" = "$TECHNITIUM_AMD64_DIGEST" ] ||
+    fail "cached OCI archive digest mismatch: $archive_digest"
+
+sha256sum "$archive"
+
+if [ ! -s "$tailscale_archive" ]; then
+    tailscale_partial=$tailscale_archive.partial
+    trap 'rm -f "$tailscale_partial"' EXIT HUP INT TERM
+    curl --fail --location --proto '=https' --tlsv1.2 \
+        --output "$tailscale_partial" "$TAILSCALE_AMD64_URL"
+    printf '%s  %s\n' "$TAILSCALE_AMD64_SHA256" "$tailscale_partial" |
+        sha256sum -c -
+    mv "$tailscale_partial" "$tailscale_archive"
+    trap - EXIT HUP INT TERM
+fi
+
+printf '%s  %s\n' "$TAILSCALE_AMD64_SHA256" "$tailscale_archive" |
+    sha256sum -c -

@@ -1,0 +1,17 @@
+$ORIGIN home.arpa.
+$TTL 300
+@ IN SOA dns01.home.arpa. hostmaster.home.arpa. (
+    2026101501  ; serial
+    3600        ; refresh
+    600         ; retry
+    604800      ; expire
+    300         ; negative cache TTL
+)
+@     IN NS dns01.home.arpa.
+@     IN NS dns02.home.arpa.
+@     IN NS dns03.home.arpa.
+dns01 IN A 10.0.5.1
+dns02 IN A 10.0.5.2
+dns03 IN A 10.0.5.3
+dns-api IN A 10.0.5.1
+canary  IN A 10.0.9.9

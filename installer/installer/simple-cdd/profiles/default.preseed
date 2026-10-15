@@ -1,0 +1,51 @@
+# Debian 13 installer answers shared by all three appliances.
+
+d-i debian-installer/locale string en_US.UTF-8
+d-i keyboard-configuration/xkb-keymap select us
+d-i console-setup/ask_detect boolean false
+
+# install-gate identifies the role before networking and the disk immediately
+# before partitioning. Either command failing returns to the installer menu.
+d-i preseed/early_command string anna-install simple-cdd-profiles; /bin/sh /cdrom/simple-cdd/install-gate identify
+d-i partman/early_command string /bin/sh /cdrom/simple-cdd/install-gate select-disk
+
+d-i netcfg/disable_autoconfig boolean true
+d-i netcfg/wireless_wep string
+
+d-i mirror/country string manual
+d-i apt-setup/use_mirror boolean false
+d-i apt-setup/services-select multiselect
+d-i apt-setup/non-free-firmware boolean true
+
+d-i passwd/root-login boolean false
+d-i passwd/make-user boolean true
+d-i passwd/user-fullname string DNS Operator
+d-i passwd/username string operator
+d-i passwd/user-password-crypted password !
+d-i passwd/user-default-groups string audio cdrom dip plugdev sudo video
+
+d-i clock-setup/utc boolean true
+d-i time/zone string Asia/Seoul
+d-i clock-setup/ntp boolean false
+
+d-i partman-auto/method string regular
+d-i partman-auto/choose_recipe select atomic
+d-i partman-auto/purge_lvm_from_device boolean true
+d-i partman-lvm/device_remove_lvm boolean true
+d-i partman-md/device_remove_md boolean true
+d-i partman-lvm/confirm boolean true
+d-i partman-lvm/confirm_nooverwrite boolean true
+d-i partman/confirm_write_new_label boolean true
+d-i partman/choose_partition select finish
+d-i partman/confirm boolean true
+d-i partman/confirm_nooverwrite boolean true
+
+d-i grub-installer/only_debian boolean true
+d-i grub-installer/with_other_os boolean false
+d-i grub-installer/force-efi-extra-removable boolean false
+
+tasksel tasksel/first multiselect
+popularity-contest popularity-contest/participate boolean false
+
+d-i cdrom-detect/eject boolean false
+d-i finish-install/reboot_in_progress note

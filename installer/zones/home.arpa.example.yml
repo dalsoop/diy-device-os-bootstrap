@@ -1,0 +1,19 @@
+---
+zone: home.arpa
+default_ttl: 300
+records:
+  - name: dns01
+    type: A
+    value: 10.0.5.1
+  - name: dns02
+    type: A
+    value: 10.0.5.2
+  - name: dns03
+    type: A
+    value: 10.0.5.3
+  - name: dns-api
+    type: A
+    value: 10.0.5.1
+  - name: canary
+    type: A
+    value: 10.0.9.9

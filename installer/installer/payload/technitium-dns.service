@@ -1,0 +1,17 @@
+[Unit]
+Description=Pinned Technitium DNS Server container
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10s
+ExecStartPre=-/usr/bin/podman rm -f technitium-dns
+ExecStart=/usr/local/sbin/dns-appliance-technitium-run
+ExecStop=/usr/bin/podman stop --time 20 technitium-dns
+TimeoutStartSec=180
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+command -v python3 >/dev/null 2>&1 || {
+    echo "DNS 장비 상태판: python3가 필요합니다." >&2
+    exit 1
+}
+
+echo "DNS 장비 상태판: http://127.0.0.1:8080"
+echo "종료하려면 Ctrl-C를 누르세요."
+exec python3 "$script_dir/server.py" --config "$script_dir/config.json" "$@"

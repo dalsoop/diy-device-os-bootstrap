@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+# shellcheck source=/dev/null
+. /etc/dns-appliance/sources.env
+
+exec /usr/bin/podman run --name technitium-dns --replace \
+    --network host \
+    --security-opt=no-new-privileges \
+    --cap-drop=all --cap-add=NET_BIND_SERVICE \
+    --env-file /etc/dns-appliance/technitium.env \
+    --volume /var/lib/technitium:/etc/dns \
+    --volume /var/log/technitium:/var/log/technitium/dns \
+    --volume /var/lib/dns-appliance/secrets:/run/dns-appliance-secrets:ro \
+    "$TECHNITIUM_IMAGE:$TECHNITIUM_VERSION"

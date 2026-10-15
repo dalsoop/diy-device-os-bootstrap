@@ -1,0 +1,106 @@
+#!/bin/bash
+set -euo pipefail
+
+url=${TECHNITIUM_URL:-https://10.0.5.1:53443}
+token_file=${TECHNITIUM_TOKEN_FILE:-}
+state_home=${XDG_STATE_HOME:-${HOME:?HOME is required}/.local/state}
+audit_log=${DNSCTL_AUDIT_LOG:-$state_home/dns-appliance/dnsctl-audit.jsonl}
+
+usage() {
+    echo "usage: TECHNITIUM_TOKEN_FILE=/secure/token $0 health|plan <zone-file>|apply <zone-file> --approved-commit <sha> --confirm APPLY" >&2
+    exit 2
+}
+
+if ! { [ -n "$token_file" ] && [ -s "$token_file" ]; }; then
+    usage
+fi
+token=$(cat "$token_file")
+command=${1:-}
+
+api() {
+    method=$1
+    path=$2
+    shift 2
+    curl --fail --silent --show-error --insecure -X "$method" \
+        -H "Authorization: Bearer $token" "$url$path" "$@"
+}
+
+audit() {
+    action=$1
+    result=$2
+    mkdir -p "$(dirname "$audit_log")"
+    jq -nc --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg action "$action" --arg result "$result" \
+        --arg commit "$(git rev-parse HEAD 2>/dev/null || printf unknown)" \
+        '{at:$at,action:$action,result:$result,commit:$commit}' >> "$audit_log"
+}
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+case "$command" in
+    health)
+        api GET '/api/dashboard/metrics/json' | jq '{status,server,uptimeSeconds:.response.uptimeSeconds,lifetimeCounters:.response.lifetimeCounters}'
+        ;;
+    plan)
+        zone_file=${2:-}
+        [ -r "$zone_file" ] || usage
+        zone=$(awk '$2 == "IN" && $3 == "SOA" { print $1; exit }' "$zone_file")
+        [ "$zone" = @ ] && zone=$(awk '/^\$ORIGIN / { sub(/\.$/, "", $2); print $2; exit }' "$zone_file")
+        [ -n "$zone" ] || { echo "dnsctl: cannot determine zone" >&2; exit 1; }
+        current=$(mktemp)
+        trap 'rm -f "$current"' EXIT HUP INT TERM
+        api GET "/api/zones/export?zone=$zone" > "$current"
+        current_sha=$(sha256_file "$current")
+        desired_sha=$(sha256_file "$zone_file")
+        changed=true
+        cmp -s "$current" "$zone_file" && changed=false
+        jq -n --arg zone "$zone" --arg current_sha256 "$current_sha" \
+            --arg desired_sha256 "$desired_sha" --argjson changed "$changed" \
+            '{schema_version:1,zone:$zone,current_sha256:$current_sha256,desired_sha256:$desired_sha256,changed:$changed}'
+        if [ "$changed" = true ]; then
+            diff -u "$current" "$zone_file" >&2 || true
+        fi
+        audit "plan:$zone" ok
+        ;;
+    apply)
+        zone_file=${2:-}
+        shift 2 || true
+        approved_commit=
+        confirm=
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --approved-commit) approved_commit=${2:-}; shift 2 ;;
+                --confirm) confirm=${2:-}; shift 2 ;;
+                *) usage ;;
+            esac
+        done
+        [ "$confirm" = APPLY ] || { echo "dnsctl: --confirm APPLY is required" >&2; exit 1; }
+        [ -r "$zone_file" ] || usage
+        [ -n "$approved_commit" ] || usage
+        [ "$(git rev-parse HEAD)" = "$approved_commit" ] || {
+            echo "dnsctl: approved commit is not the checked-out commit" >&2
+            exit 1
+        }
+        [ -z "$(git status --short -- "$zone_file")" ] || {
+            echo "dnsctl: zone file has uncommitted changes" >&2
+            exit 1
+        }
+        zone=$(awk '/^\$ORIGIN / { sub(/\.$/, "", $2); print $2; exit }' "$zone_file")
+        response=$(api POST "/api/zones/import?zone=$zone&overwrite=true&overwriteZone=true" \
+            -F "file=@$zone_file;type=text/plain")
+        [ "$(jq -r '.status' <<<"$response")" = ok ] || {
+            audit "apply:$zone" failed
+            printf '%s\n' "$response" >&2
+            exit 1
+        }
+        audit "apply:$zone" ok
+        printf '%s\n' "$response" | jq '{status,response}'
+        ;;
+    *) usage ;;
+esac

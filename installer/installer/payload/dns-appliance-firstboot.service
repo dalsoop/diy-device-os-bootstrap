@@ -1,0 +1,16 @@
+[Unit]
+Description=DNS appliance first-boot provisioning and encrypted enrollment
+After=network-online.target cockpit.socket
+Wants=network-online.target cockpit.socket
+ConditionPathExists=!/var/lib/dns-appliance/COMPLETE
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dns-appliance-firstboot
+Restart=on-failure
+RestartSec=60s
+RemainAfterExit=yes
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target

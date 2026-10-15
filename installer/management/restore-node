@@ -1,0 +1,45 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+url=
+token_file=
+backup=
+identity=
+confirmation=
+usage() {
+    echo "usage: $0 --url https://10.0.5.1:53443 --token-file /secure/token --backup file.zip.age --identity age-key.txt --confirm 'RESTORE https://10.0.5.1:53443'" >&2
+    exit 2
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --url) url=${2:-}; shift 2 ;;
+        --token-file) token_file=${2:-}; shift 2 ;;
+        --backup) backup=${2:-}; shift 2 ;;
+        --identity) identity=${2:-}; shift 2 ;;
+        --confirm) confirmation=${2:-}; shift 2 ;;
+        *) usage ;;
+    esac
+done
+
+if ! { [ -n "$url" ] && [ -s "$token_file" ] && [ -s "$backup" ] &&
+    [ -s "$identity" ]; }; then
+    usage
+fi
+[ "$confirmation" = "RESTORE $url" ] || { echo "restore-node: exact confirmation is required" >&2; exit 1; }
+token=$(cat "$token_file")
+plain=$(mktemp "${TMPDIR:-/tmp}/dns-restore.XXXXXX.zip")
+trap 'rm -f "$plain"' EXIT HUP INT TERM
+age -d -i "$identity" -o "$plain" "$backup"
+unzip -t "$plain" >/dev/null
+
+response=$(curl --fail --silent --show-error --insecure -X POST \
+    -H "Authorization: Bearer $token" \
+    "$url/api/settings/restore?blockLists=true&logs=false&scopes=false&apps=true&stats=false&zones=true&allowedZones=true&blockedZones=true&dnsSettings=true&logSettings=true&deleteExistingFiles=false&authConfig=true" \
+    -F "file=@$plain;type=application/zip")
+[ "$(jq -r '.status' <<<"$response")" = ok ] || {
+    printf '%s\n' "$response" >&2
+    exit 1
+}
+echo "restore-node: Technitium accepted the encrypted backup restore"

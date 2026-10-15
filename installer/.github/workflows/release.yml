@@ -1,0 +1,34 @@
+name: Build installer release candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64, dns-image-builder]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Use runner-local public inputs
+        run: |
+          install -m 0644 /etc/dns-appliance-builder/operator-authorized-keys installer/inputs/operator-authorized-keys
+          install -m 0644 /etc/dns-appliance-builder/age-recipient installer/inputs/age-recipient
+      - name: Fetch digest-pinned Technitium image
+        run: installer/fetch-locked-sources
+      - name: Build candidate ISO and manifests
+        env:
+          DNS_APPLIANCE_INVENTORY_DIR: /etc/dns-appliance-builder/inventory
+        run: installer/build-image
+      - name: Upload verification artifacts only
+        uses: actions/upload-artifact@v4
+        with:
+          name: dns-appliance-release-evidence
+          path: |
+            artifacts/SHA256SUMS
+            artifacts/build-manifest.json
+            artifacts/debian-packages.txt
+            artifacts/debian-package-sha256s.txt
+            artifacts/sbom.spdx.json
+          if-no-files-found: error

@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  safety-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install validation tools
+        run: sudo apt-get update && sudo apt-get install -y shellcheck jq
+      - name: Check shell syntax
+        run: |
+          find device-os installer management usb-media tests build -type f -perm -u+x -print0 |
+            xargs -0 -n1 bash -n
+      - name: ShellCheck
+        run: |
+          find device-os installer management usb-media tests build -type f -perm -u+x -print0 |
+            xargs -0 shellcheck
+      - name: Check Python syntax
+        run: |
+          python3 -c 'compile(open("management/dns-appliance-status-monitor/server.py", encoding="utf-8").read(), "server.py", "exec")'
+      - name: Resolve pinned device media catalog
+        run: usb-media/resolve-catalog
+      - name: Run isolated installer simulations
+        run: tests/install-gate-simulation.sh
+      - name: Run management safety simulations
+        run: tests/management-simulation.sh
+      - name: Run Tailscale enrollment simulation
+        run: tests/tailscale-enrollment-simulation.sh
+      - name: Run polymorphic media catalog simulation
+        run: tests/media-catalog-simulation.sh
+      - name: Run macOS writer simulation
+        run: tests/macos-writer-simulation.sh
+      - name: Verify repository contracts
+        run: tests/repository-contract.sh

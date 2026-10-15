@@ -1,0 +1,98 @@
+#!/bin/bash
+set -euo pipefail
+
+device=
+iso=
+manifest=
+confirmation=
+usage() {
+    echo "usage: sudo $0 --device /dev/sdX --iso image.iso --manifest build-manifest.json --confirm 'ERASE /dev/sdX'" >&2
+    exit 2
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --device) device=${2:-}; shift 2 ;;
+        --iso) iso=${2:-}; shift 2 ;;
+        --manifest) manifest=${2:-}; shift 2 ;;
+        --confirm) confirmation=${2:-}; shift 2 ;;
+        *) usage ;;
+    esac
+done
+
+[ "$(uname -s)" = Linux ] || { echo "write-usb-linux: Linux is required" >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "write-usb-linux: run as root" >&2; exit 1; }
+[ -b "$device" ] || usage
+[ "$(lsblk -dnro TYPE "$device")" = disk ] || { echo "write-usb-linux: whole disk required" >&2; exit 1; }
+if ! { [ -r "$iso" ] && [ -r "$manifest" ]; }; then
+    usage
+fi
+[ "$confirmation" = "ERASE $device" ] || { echo "write-usb-linux: exact erase confirmation required" >&2; exit 1; }
+
+root_source=$(findmnt -nro SOURCE /)
+root_parent=/dev/$(lsblk -no PKNAME "$root_source" 2>/dev/null | sed -n '1p')
+[ "$device" != "$root_parent" ] || { echo "write-usb-linux: refusing root disk" >&2; exit 1; }
+[ "$(lsblk -dnro RM "$device")" = 1 ] || { echo "write-usb-linux: target is not reported removable" >&2; exit 1; }
+
+expected_sha=$(jq -er '.iso_sha256' "$manifest")
+actual_sha=$(sha256sum "$iso" | awk '{print $1}')
+[ "$actual_sha" = "$expected_sha" ] || { echo "write-usb-linux: ISO checksum mismatch" >&2; exit 1; }
+
+iso_bytes=$(stat -c %s "$iso")
+device_bytes=$(blockdev --getsize64 "$device")
+[ "$device_bytes" -gt $((iso_bytes + 268435456)) ] || {
+    echo "write-usb-linux: USB needs at least 256 MiB after the ISO" >&2
+    exit 1
+}
+
+while read -r partition; do
+    if [ -n "$partition" ]; then
+        umount "$partition" 2>/dev/null || true
+    fi
+done < <(lsblk -nrpo NAME,TYPE "$device" | awk '$2 == "part" { print $1 }')
+
+dd if="$iso" of="$device" bs=4M conv=fsync status=progress
+blockdev --rereadpt "$device" || true
+udevadm settle
+
+sector_size=$(blockdev --getss "$device")
+last_sector=$(sfdisk -J "$device" | jq '[.partitiontable.partitions[] | .start + .size] | max')
+start=$(( (last_sector + 2047) / 2048 * 2048 ))
+total_sectors=$((device_bytes / sector_size))
+[ $((total_sectors - start)) -gt 131072 ] || {
+    echo "write-usb-linux: insufficient aligned space for DNS-ENROLL" >&2
+    exit 1
+}
+
+label=$(sfdisk -J "$device" | jq -r '.partitiontable.label')
+case "$label" in
+    gpt) partition_type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 ;;
+    dos) partition_type=7 ;;
+    *) echo "write-usb-linux: unsupported partition table $label" >&2; exit 1 ;;
+esac
+
+printf 'start=%s, type=%s\n' "$start" "$partition_type" | sfdisk --append "$device"
+blockdev --rereadpt "$device"
+udevadm settle
+partition=$(lsblk -nrpo NAME,TYPE,START "$device" | awk -v start="$start" '$2 == "part" && $3 == start { print $1 }')
+[ -b "$partition" ] || { echo "write-usb-linux: new enrollment partition not found" >&2; exit 1; }
+mkfs.exfat -n DNS-ENROLL "$partition"
+
+mount_dir=$(mktemp -d /mnt/dns-enroll.XXXXXX)
+cleanup() {
+    if mountpoint -q "$mount_dir"; then
+        umount "$mount_dir" || true
+    fi
+    rmdir "$mount_dir" 2>/dev/null || true
+}
+trap cleanup EXIT HUP INT TERM
+mount -o nodev,nosuid,noexec,umask=0077 "$partition" "$mount_dir"
+install -d -m 0700 "$mount_dir/records" "$mount_dir/reinstall"
+jq '{schema_version:1,build_id:.build_id,image_sha256:.iso_sha256,debian_point_release,technitium_version,technitium_image_digest,tailscale_version,tailscale_archive_sha256}' \
+    "$manifest" > "$mount_dir/installer.json"
+sync -f "$mount_dir"
+umount "$mount_dir"
+
+cmp -n "$iso_bytes" "$iso" "$device"
+echo "write-usb-linux: verified installer bytes and created DNS-ENROLL on $partition"
+echo "write-usb-linux: target remains $device; eject it before unplugging"

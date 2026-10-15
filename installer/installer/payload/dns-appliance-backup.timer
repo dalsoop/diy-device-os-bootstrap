@@ -1,0 +1,10 @@
+[Unit]
+Description=Create a daily encrypted DNS appliance backup
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

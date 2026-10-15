@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "product": {
+    "name": "Gujo Homelab OS USB",
+    "repository": "https://github.com/dalsoop/gujo-homelab-os-installer"
+  },
+  "catalog": {
+    "repository": "https://github.com/dalsoop/gujo-homelab-os-catalog.git",
+    "revision": "e85577ba632c90282da8b5984561ee0825828199",
+    "index": "catalog/index.json",
+    "bootloader": "ventoy"
+  },
+  "collection": "collections/device-os.json",
+  "local_entries": [
+    "usb-media/local-entries/dns-appliance.json"
+  ],
+  "usb": {
+    "data_label": "DEVICE-INST",
+    "enrollment_label": "DNS-ENROLL",
+    "enrollment_reserve_mib": 2048,
+    "capacity_overhead_mib": 768,
+    "default_language": "ko_KR"
+  },
+  "bundles": [
+    {
+      "id": "pop-os-korean-guide",
+      "destination": "guides/POP_OS_KO.md",
+      "source": { "kind": "repository-file", "path": "usb-media/guides/pop-os-ko.md" }
+    },
+    {
+      "id": "dns-appliance-status-monitor",
+      "destination": "tools/dns-appliance-status-monitor",
+      "source": { "kind": "repository-tree", "path": "management/dns-appliance-status-monitor" }
+    }
+  ]
+}

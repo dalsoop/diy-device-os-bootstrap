@@ -1,0 +1,9 @@
+[Unit]
+Description=Create an age-encrypted Technitium configuration backup
+After=technitium-dns.service
+Requires=technitium-dns.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dns-appliance-backup
+Nice=10

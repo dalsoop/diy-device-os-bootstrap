@@ -1,0 +1,7 @@
+[Unit]
+Description=Probe DNS appliance services and publish node-exporter metrics
+After=technitium-dns.service cockpit.socket
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dns-appliance-health
