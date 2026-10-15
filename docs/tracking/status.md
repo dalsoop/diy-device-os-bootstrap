@@ -10,8 +10,8 @@
 | HTTPS and lowercase SHA-256 enforcement | Yes | CI fixture | Per-release provenance review |
 | Duplicate ID, path, and filename rejection | Yes | CI fixture | More direct duplicate-path cases |
 | Unsafe relative path rejection | Yes | Executable rule | Dedicated traversal fixtures |
-| Public guarded unattended profiles | Intentionally absent | Boundary verified by contract | None; local Flasher responsibility |
-| Media download or boot verification | Intentionally absent | No | Flasher and physical verification |
+| Public guarded unattended profiles | Intentionally absent | Boundary verified by contract | None; local Installer responsibility |
+| Media download or boot verification | Intentionally absent | No | Installer and physical verification |
 | Automated vendor release discovery | No | No | Trust and provenance design required |
 
 Current release state: usable public metadata catalog with contract validation.

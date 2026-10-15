@@ -1,13 +1,13 @@
-# Device OS Catalog
+# Gujo Homelab OS Catalog
 
-[![CI](https://github.com/dalsoop/device-os-catalog/actions/workflows/ci.yml/badge.svg)](https://github.com/dalsoop/device-os-catalog/actions/workflows/ci.yml)
+[![CI](https://github.com/dalsoop/gujo-homelab-os-catalog/actions/workflows/ci.yml/badge.svg)](https://github.com/dalsoop/gujo-homelab-os-catalog/actions/workflows/ci.yml)
 
 A public, data-only catalog of bootloaders, operating-system installers, and live
 environments for device installation media. It stores official HTTPS download
 locations, release versions, SHA-256 values, menu descriptions, and boot
 behavior. It does not store or download ISO images.
 
-[Device OS Flasher](https://github.com/dalsoop/device-os-flasher)
+[Gujo Homelab OS Installer](https://github.com/dalsoop/gujo-homelab-os-installer)
 pins an exact Catalog commit, selects entries, verifies downloads, and assembles
 the physical USB.
 
@@ -39,7 +39,7 @@ validation.
 5. Run `bin/verify-catalog` and open a pull request.
 
 Private images, organization-only URLs, credentials, hardware inventory, and
-automatic-install profiles do not belong here. Keep them in a Flasher fork.
+automatic-install profiles do not belong here. Keep them in a Installer fork.
 
 ## Contract summary
 
@@ -64,7 +64,7 @@ Run the full local contract gate with:
 tests/catalog-contract.sh
 ```
 
-A valid Catalog proves metadata shape and internal consistency. Flasher and
+A valid Catalog proves metadata shape and internal consistency. Installer and
 physical-device verification are separate.
 
 ## Documentation

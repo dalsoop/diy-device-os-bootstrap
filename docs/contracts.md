@@ -17,7 +17,7 @@ A public media entry contains:
 | --- | --- |
 | `schema_version` | exactly 1 |
 | `id` | stable lowercase letters, digits, and hyphens |
-| `group` | lowercase-hyphen menu group expected by Flashers |
+| `group` | lowercase-hyphen menu group expected by Installers |
 | `version` | non-empty vendor release identity |
 | `architecture` | optional non-empty architecture label |
 | `destination` | safe relative `images/...iso` path |
@@ -40,7 +40,7 @@ The Catalog does not define guarded unattended behavior or runtime artifacts.
 
 A bootloader contains schema version, stable ID, implementation, version,
 archive root, and a locked-download source. Its URL and digest rules match media
-entries. The archive root is a safe relative value used by the Flasher after
+entries. The archive root is a safe relative value used by the Installer after
 verified extraction.
 
 ## Path rules
@@ -58,7 +58,7 @@ altering field meaning is a compatibility change.
 
 Compatible contract evolution requires existing consumers to remain secure and
 correct. Incompatible evolution requires a new schema version and coordinated
-Flasher updates before publishing entries that depend on it.
+Installer updates before publishing entries that depend on it.
 
 ## Verification result
 

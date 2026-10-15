@@ -3,7 +3,7 @@
 ## Trust model
 
 Catalog data is public and non-secret. It is still supply-chain input: a changed
-URL or digest can redirect Flasher users to a different artifact. Pull-request
+URL or digest can redirect Installer users to a different artifact. Pull-request
 review, exact commit pinning, HTTPS, authoritative checksum provenance, and
 consumer-side digest verification are independent controls.
 
@@ -41,7 +41,7 @@ authenticity. If provenance is missing or contradictory, do not merge the
 update.
 
 Compromised or withdrawn media is handled by removing or correcting the entry in
-a reviewed commit and notifying consumers to repin. Existing Flasher pins remain
+a reviewed commit and notifying consumers to repin. Existing Installer pins remain
 historical and are not silently mutated.
 
 ## Incident response

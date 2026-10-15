@@ -1,4 +1,4 @@
-# 0001: Keep the Catalog Public, Data-Only, and Separate from Flashers
+# 0001: Keep the Catalog Public, Data-Only, and Separate from Installers
 
 - Status: Accepted
 - Date: 2026-10-15
@@ -13,12 +13,12 @@ and destructive risk.
 
 The Catalog stores only public bootloader and media metadata. It contains no
 credentials, private media, executable behavior, collection choice, local
-profile, download execution, or disk-write logic. Flashers consume an exact
+profile, download execution, or disk-write logic. Installers consume an exact
 commit as untrusted data and enforce their own contracts.
 
 ## Rejected alternatives
 
-- Combining Catalog and Flasher was rejected because shared public metadata
+- Combining Catalog and Installer was rejected because shared public metadata
   would inherit local selection, secret, and destructive-write concerns.
 - Allowing executable entry hooks was rejected because a metadata pull request
   would become code execution in consuming forks.
@@ -27,6 +27,6 @@ commit as untrusted data and enforce their own contracts.
 
 ## Consequences
 
-The Catalog can remain public and broadly reusable. Flasher forks keep local
-policy and secrets. Adding behavior requires a Flasher change rather than a
+The Catalog can remain public and broadly reusable. Installer forks keep local
+policy and secrets. Adding behavior requires a Installer change rather than a
 Catalog field that silently becomes executable.

@@ -23,14 +23,14 @@ Response: correct the data to the published contract. If new semantics are
 actually required, treat that as a coordinated contract change rather than
 loosening one check.
 
-## Catalog passes but Flasher does not see the item
+## Catalog passes but Installer does not see the item
 
 Symptom: a merged public entry is absent from a user's media.
 
-Cause: Flashers pin an exact older Catalog commit, and their collection must
+Cause: Installers pin an exact older Catalog commit, and their collection must
 also select the stable ID.
 
-Response: update the Flasher pin deliberately, review the Catalog diff between
+Response: update the Installer pin deliberately, review the Catalog diff between
 commits, add the ID to the collection, and inspect the resolved plan.
 
 ## Checksum uncertainty

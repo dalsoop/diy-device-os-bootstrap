@@ -6,7 +6,7 @@ This module publishes the JSON Schema representation of Catalog contracts.
 - Reject unexpected fields with `additionalProperties: false`.
 - Use stable definitions for IDs, HTTPS sources, lowercase SHA-256, and safe
   relative destinations.
-- Do not describe Flasher-only runtime artifacts, profile adapters, selection,
+- Do not describe Installer-only runtime artifacts, profile adapters, selection,
   or disk behavior.
 - Incompatible required fields or changed meanings require a schema-version
   decision and coordinated consumer updates.

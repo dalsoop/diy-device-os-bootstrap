@@ -7,7 +7,7 @@ repo_root=${DEVICE_MEDIA_CATALOG_ROOT:-$default_root}
 index=$repo_root/catalog/index.json
 
 fail() {
-    echo "device OS catalog: $*" >&2
+    echo "Gujo Homelab OS Catalog: $*" >&2
     exit 1
 }
 
@@ -22,8 +22,8 @@ jq -e '
     (startswith("/") | not) and
     (split("/") | all(. != "" and . != "." and . != ".."));
   .schema_version == 1 and
-  .name == "Device OS Catalog" and
-  .repository == "https://github.com/dalsoop/device-os-catalog" and
+  .name == "Gujo Homelab OS Catalog" and
+  .repository == "https://github.com/dalsoop/gujo-homelab-os-catalog" and
   (.bootloaders | type == "array" and length > 0) and
   (.entries | type == "array" and length > 0) and
   (all(.bootloaders[]; (.id | safe_id) and (.path | safe_rel) and (.path | startswith("catalog/bootloaders/")))) and
@@ -102,5 +102,5 @@ while IFS="$tab" read -r expected_id path; do
     ' "$file" >/dev/null || fail "bootloader contract is invalid: $path"
 done
 
-echo "device OS catalog: valid"
+echo "Gujo Homelab OS Catalog: valid"
 

@@ -1,14 +1,14 @@
-# Device OS Catalog
+# Gujo Homelab OS Catalog
 
 This repository is the public, data-only source of bootloader and operating
-system metadata consumed by Device OS Flasher forks. It publishes
+system metadata consumed by Gujo Homelab OS Installer forks. It publishes
 versioned JSON contracts, official HTTPS locations, checksums, menu text, and
 boot behavior. It never downloads, executes, or writes the media it describes.
 
 ## Project map
 
 ```text
-device-os-catalog/
+gujo-homelab-os-catalog/
 ├── AGENTS.md
 ├── CLAUDE.md
 ├── README.md
@@ -53,7 +53,7 @@ device-os-catalog/
 - Keep one item per JSON file, register every controlled file exactly once, and
   preserve stable IDs across release updates.
 - Public entries remain interactive installers or live environments with
-  `profile_adapter: none`; private and guarded profiles belong in Flasher forks.
+  `profile_adapter: none`; private and guarded profiles belong in Installer forks.
 - Do not add download execution, hooks, collection policy, USB layout, or
   disk-write behavior to this data-only repository.
 
@@ -76,5 +76,5 @@ device-os-catalog/
   do not claim strict unknown-field enforcement until parity is implemented.
 - Update data, index, schemas, validator, fixtures, and documentation together
   when a contract changes.
-- A merged Catalog commit is metadata only. Flashers must deliberately pin it
+- A merged Catalog commit is metadata only. Installers must deliberately pin it
   and perform download, media, firmware, and hardware verification separately.

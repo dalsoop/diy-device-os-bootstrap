@@ -8,8 +8,8 @@ Debian/Ubuntu:
 ```sh
 sudo apt-get update
 sudo apt-get install -y git jq shellcheck
-git clone https://github.com/dalsoop/device-os-catalog.git
-cd device-os-catalog
+git clone https://github.com/dalsoop/gujo-homelab-os-catalog.git
+cd gujo-homelab-os-catalog
 ```
 
 Catalog operations do not require root after package installation and must not
@@ -24,7 +24,7 @@ download ISO images or access block devices.
    contract.
 5. Register the same ID and path in `catalog/index.json`.
 6. Run the repository contract gate and review the exact diff.
-7. Open a pull request with checksum provenance and intended Flasher use.
+7. Open a pull request with checksum provenance and intended Installer use.
 
 Do not download large media into the repository. Do not add private or guarded
 profiles.
@@ -42,7 +42,7 @@ cannot be confirmed, leave the existing entry unchanged and record the block.
 
 Treat a bootloader update as supply-chain critical because every assembled USB
 depends on it. Update version, archive root, source filename, URL, and digest
-together. Ensure the implementation remains supported by Flasher consumers
+together. Ensure the implementation remains supported by Installer consumers
 before merge.
 
 ## Validate
@@ -58,20 +58,20 @@ data-only, and must not download images or access block devices.
 ## Publish and consume
 
 Merging to `main` publishes a new Catalog commit. There is no mutable Catalog
-release that automatically changes Flashers. A Flasher operator reviews the
+release that automatically changes Installers. A Installer operator reviews the
 commit range, pins the exact new commit, resolves the plan, and performs
 download and physical verification separately.
 
 ## Correct a bad entry
 
 Create a reviewed correction or removal immediately. Identify affected commit
-IDs and notify known Flasher consumers to repin. Do not rewrite public history
+IDs and notify known Installer consumers to repin. Do not rewrite public history
 merely to make `main` look correct; pinned consumers need an explicit safe
 replacement.
 
 ## Rollback
 
-Catalog rollback means a Flasher pins a previously reviewed safe commit or a
-new correction commit. It does not mean deleting the Flasher's recorded input.
+Catalog rollback means a Installer pins a previously reviewed safe commit or a
+new correction commit. It does not mean deleting the Installer's recorded input.
 Keep enough Git history and pull-request evidence to explain why a digest or
 source changed.

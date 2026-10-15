@@ -14,7 +14,7 @@ Catalog.
 
 The executable verifier is the CI enforcement surface. JSON Schemas are the
 published representation. A contract change updates both, all fixtures, and
-known Flasher consumers in one coordinated pull request.
+known Installer consumers in one coordinated pull request.
 
 Preserve `schema_version: 1` meaning. New optional data is compatible only when
 existing consumers safely ignore it. New required fields, changed accepted
