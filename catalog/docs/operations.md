@@ -8,7 +8,7 @@ Debian/Ubuntu:
 ```sh
 sudo apt-get update
 sudo apt-get install -y git jq shellcheck
-git clone https://github.com/dalsoop/gujo-homelab.git
+git clone https://github.com/dalsoop/gujo-homelab-os-playbook.git
 cd gujo-homelab/catalog
 ```
 

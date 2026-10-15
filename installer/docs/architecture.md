@@ -21,11 +21,11 @@ verification tools, and explicit management commands.
 ## Planned World boundary
 
 The user-owned
-[Gujo Homelab World Playbook](https://github.com/dalsoop/gujo-homelab/tree/main/world)
+[World module](https://github.com/dalsoop/gujo-homelab-os-playbook/tree/main/world)
 is the planned source of environment
 intent. It will select Catalog entries, bind installation intent to the user's
 devices, and provide policy to this Installer without moving Installer behavior
-or long-lived secrets into the Playbook.
+or long-lived secrets into the World module.
 
 Its history is organized by verified USB creation, not by the first draft or
 latest edit of an environment. Each successful physical USB write publishes a

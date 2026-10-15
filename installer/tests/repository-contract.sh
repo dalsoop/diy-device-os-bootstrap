@@ -89,7 +89,7 @@ grep -q 'runtime-artifact' "$repo_root/README.md"
 grep -q 'locked-download' "$repo_root/usb-media/README.md"
 grep -q '"kind": "workspace"' "$repo_root/usb-media/composition.json"
 grep -q '"path": "catalog"' "$repo_root/usb-media/composition.json"
-grep -q 'https://github.com/dalsoop/gujo-homelab' "$repo_root/usb-media/composition.json"
+grep -q 'https://github.com/dalsoop/gujo-homelab-os-playbook' "$repo_root/usb-media/composition.json"
 
 if git -C "$repo_root" grep -I -n -i -E \
     'dns-appliance-provisioning|device-install-media|device-os-flasher|device-os-catalog|superusb|homelab-usb|homelab-bootstrap-media|Homelab Bootstrap|homelab-provisioning|Homelab Install & Recovery' \

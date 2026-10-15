@@ -2,7 +2,7 @@ apiVersion: homelab.gujo.dev/v1alpha1
 kind: WorldPlaybook
 
 metadata:
-  name: Gujo Homelab World Playbook
+  name: Gujo Homelab OS Playbook
 
 spec:
   timezone: Asia/Seoul

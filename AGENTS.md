@@ -1,6 +1,6 @@
-# Gujo Homelab
+# Gujo Homelab OS Playbook
 
-This monorepo is the single source of truth for one homelab World, public OS
+This user-owned monorepo playbook is the single source of truth for one homelab World, public OS
 metadata, guarded installation-media tooling, and append-only physical USB
 generation evidence.
 
