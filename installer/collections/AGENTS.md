@@ -10,8 +10,8 @@ includes and how they are grouped on the USB.
   reviewed with the resolved plan.
 - Selection does not change an entry's boot behavior or grant unattended
   installation.
-- Keep reference choices here instead of editing shared resolver code. Final
-  user selection moves to `../world/` when the World consumer is implemented.
+- Keep contributor reference choices here instead of editing shared resolver
+  code. Ordinary user selection belongs in `../world/`.
 - Verify every selection change with a resolved plan and confirm that omitted
   entries, menu groups, DNS reserve, and capacity still match intent.
 

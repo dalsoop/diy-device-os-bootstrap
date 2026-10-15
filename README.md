@@ -34,19 +34,20 @@ fork, selection, capacity, DNS build, Linux USB write, verification, and
 enrollment workflow.
 
 The example [`world/drafts/gujo-home/world.yaml`](world/drafts/gujo-home/world.yaml)
-describes intended devices, networks, services, and media. It is not yet
-consumed by `device-os`; the current command uses the reference selection in
-`installer/collections/device-os.json`. Local hardware observations belong in
-ignored directories, and passwords, tokens, private keys, generated images,
-and raw hardware identifiers never belong in Git.
+describes intended devices, networks, services, media, and fail-closed policy.
+`device-os world ...` validates that draft and uses its media entries as the
+USB selection. Local hardware observations belong in ignored directories, and
+passwords, tokens, private keys, generated images, and raw hardware identifiers
+never belong in Git.
 
 Use the root command for read-only media operations:
 
 ```sh
-./device-os available
-./device-os plan
-./device-os capacity --capacity 16GB
-./device-os simulate
+./device-os world validate
+./device-os world available
+./device-os world plan
+./device-os world capacity --capacity 16GB
+./device-os world simulate
 ```
 
 `simulate` does not download images or write a disk. A capacity check may make
@@ -99,12 +100,13 @@ The embedded Catalog is locked by the monorepo commit and Catalog tree identity
 recorded in each resolved plan and completed World generation. Generated media,
 caches, credentials, and recovery material remain outside Git.
 
-## Current default media
+## Current World media
 
-The current reference composition includes Proxmox VE, Proxmox Backup Server,
-TrueNAS SCALE, Pop!_OS, Debian Live, and a guarded offline installer for the
-three HP DNS appliances. General operating-system installers remain interactive.
-Only the DNS profile has guarded unattended behavior.
+The example World selects TrueNAS SCALE and a guarded offline installer for the
+three HP DNS appliances. The embedded Catalog also offers Proxmox VE, Proxmox
+Backup Server, Pop!_OS, and Debian Live; add or remove their stable IDs in the
+World's `spec.media[].entries`. General operating-system installers remain
+interactive. Only the DNS profile has guarded unattended behavior.
 
 ## Documentation
 
@@ -112,6 +114,7 @@ Only the DNS profile has guarded unattended behavior.
 - [Monorepo architecture](docs/architecture.md)
 - [Security boundaries](docs/security.md)
 - [Migration decision](docs/tracking/decisions/0001-consolidate-into-one-monorepo.md)
+- [World selection decision](docs/tracking/decisions/0002-world-drives-operator-media-selection.md)
 - [World contract](world/docs/contracts.md)
 - [Installer operations](installer/docs/operations.md)
 - [Physical verification gates](installer/docs/verification.md)

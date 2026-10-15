@@ -4,8 +4,8 @@ Run every command in this document from the monorepo root.
 
 ## Supported environments
 
-Catalog planning needs Git and jq. Image download additionally needs curl and a
-SHA-256 implementation. Physical USB assembly runs on Linux with root access,
+World and Catalog planning need Git, jq, and Ruby. Image download additionally
+needs curl and a SHA-256 implementation. Physical USB assembly runs on Linux with root access,
 Ventoy tooling, block-device utilities, and exFAT support. The DNS ISO builds on
 amd64 Debian 13 with Simple-CDD and the packages named by the build command.
 
@@ -18,10 +18,11 @@ build remain Linux-only.
 ## Safe planning workflow
 
 ```sh
-./device-os available
-./device-os plan
-./device-os capacity --capacity 16GB
-./device-os simulate
+./device-os world validate
+./device-os world available
+./device-os world plan
+./device-os world capacity --capacity 16GB
+./device-os world simulate
 ```
 
 These commands read and validate the sibling Catalog but do not download ISO
@@ -31,7 +32,7 @@ Catalog tree, USB labels, and whether the DNS profile is present.
 For an exact DNS-inclusive result, supply the built runtime artifact:
 
 ```sh
-./device-os capacity --capacity 16GB \
+./device-os world capacity --capacity 16GB \
   --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
   --runtime-manifest dns-appliance=/absolute/path/build-manifest.json
 ```
@@ -40,15 +41,17 @@ A pending or estimate result means one or more artifact sizes are unknown or
 not checksum-verified. It is not permission to write. After `prepare`, public
 image sizes come from the verified local cache and can be calculated offline.
 
-Change selection with `include <id>` or `exclude <id>`. These commands modify
-the collection and should be reviewed as ordinary source changes.
+Change selection by editing `world/drafts/<slug>/world.yaml`, then rerun
+`world validate` and `world plan`. The top-level `include <id>` and
+`exclude <id>` commands modify only the Installer reference collection for
+contributors.
 
 ## Prepare public images
 
 On the Linux builder:
 
 ```sh
-./device-os prepare
+./device-os world prepare
 ```
 
 Preparation resolves the exact monorepo and Catalog tree, downloads only
@@ -79,7 +82,7 @@ removable target by path and serial. Unplug ambiguous devices. Use absolute
 paths for runtime artifacts.
 
 ```sh
-sudo ./device-os write \
+sudo ./device-os world write \
   --device /dev/sdX \
   --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
   --runtime-manifest dns-appliance=/absolute/path/build-manifest.json \

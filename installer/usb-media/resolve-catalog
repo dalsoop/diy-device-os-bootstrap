@@ -6,6 +6,7 @@ repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 monorepo_root=$(CDPATH='' cd -- "$repo_root/.." && pwd)
 composition=${DEVICE_MEDIA_COMPOSITION:-$script_dir/composition.json}
 output=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
+world_plan=${DEVICE_MEDIA_WORLD_PLAN:-}
 
 fail() {
     echo "resolve-catalog: $*" >&2
@@ -103,6 +104,37 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 mkdir -p "$temporary/entries"
 
+if [ -n "$world_plan" ]; then
+    [ -r "$world_plan" ] || fail "World plan is not readable: $world_plan"
+    jq -e '
+      def safe_id: type == "string" and test("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$");
+      def safe_rel:
+        type == "string" and
+        test("^[A-Za-z0-9][A-Za-z0-9._+!/-]*$") and
+        (startswith("/") | not) and
+        (split("/") | all(. != "" and . != "." and . != ".."));
+      .schema_version == 1 and
+      (.source.playbook | safe_rel) and (.source.world | safe_rel) and
+      (.world.name | type == "string" and length > 0) and
+      (.world.slug | safe_id) and .world.lifecycle == "draft" and
+      (.world.timezone | type == "string" and length > 0) and
+      (.media.id | safe_id) and
+      (.media.language == "ko-KR" or .media.language == "en-US") and
+      (.media.entries | type == "array" and length > 0 and all(.[]; safe_id)) and
+      ((.media.entries | length) == (.media.entries | unique | length)) and
+      .policies.requireExactHardwareMatch == true and
+      .policies.requireSingleInternalTargetDisk == true and
+      .policies.requireTargetSpecificEraseConfirmation == true and
+      .policies.automaticBootTimeout == "disabled" and
+      (if (.media.entries | index("dns-appliance")) != null
+       then .policies.unattendedInstall == "guarded"
+       else true end)
+    ' "$world_plan" >/dev/null || fail "World plan violates its contract"
+    cp "$world_plan" "$temporary/world.json"
+else
+    printf 'null\n' > "$temporary/world.json"
+fi
+
 bootloader_path=$(jq -er --arg id "$bootloader_id" '.bootloaders[] | select(.id == $id) | .path' "$index") ||
     fail "bootloader is absent from the catalog: $bootloader_id"
 case "$bootloader_path" in catalog/bootloaders/*.json) ;; *) fail "bootloader path is unsafe" ;; esac
@@ -111,23 +143,7 @@ if [ ! -f "$bootloader" ] || [ -L "$bootloader" ]; then
     fail "bootloader file is not readable"
 fi
 
-counter=0
-jq -r '.entries[]' "$collection" > "$temporary/selected-entries"
-while IFS= read -r id; do
-    [ -n "$id" ] || continue
-    entry_path=$(jq -er --arg id "$id" '.entries[] | select(.id == $id) | .path' "$index") ||
-        fail "selected entry is absent from the catalog: $id"
-    case "$entry_path" in catalog/entries/*.json) ;; *) fail "entry path is unsafe: $id" ;; esac
-    entry=$catalog_root/$entry_path
-    if [ ! -f "$entry" ] || [ -L "$entry" ]; then
-        fail "entry file is not readable: $id"
-    fi
-    actual_id=$(jq -er '.id' "$entry")
-    [ "$actual_id" = "$id" ] || fail "index and entry IDs differ: $id"
-    counter=$((counter + 1))
-    cp "$entry" "$temporary/entries/$(printf '%03d' "$counter")-$id.json"
-done < "$temporary/selected-entries"
-
+printf '' > "$temporary/local-index.tsv"
 jq -r '.local_entries[]' "$composition" > "$temporary/local-entries"
 while IFS= read -r local_path; do
     [ -n "$local_path" ] || continue
@@ -139,9 +155,51 @@ while IFS= read -r local_path; do
     case "$id" in
         ''|*[!a-z0-9-]*|-[a-z0-9-]*|*[!a-z0-9]) fail "local entry ID is unsafe: $id" ;;
     esac
-    counter=$((counter + 1))
-    cp "$local_entry" "$temporary/entries/$(printf '%03d' "$counter")-$id.json"
+    if jq -e --arg id "$id" '.entries[] | select(.id == $id)' "$index" >/dev/null; then
+        fail "entry ID exists in both Catalog and local entries: $id"
+    fi
+    printf '%s\t%s\n' "$id" "$local_path" >> "$temporary/local-index.tsv"
 done < "$temporary/local-entries"
+
+jq -Rn '[inputs | select(length > 0) | split("\t") | {id: .[0], path: .[1]}]' \
+    < "$temporary/local-index.tsv" > "$temporary/local-index.json"
+jq -e '([.[].id] | length) == ([.[].id] | unique | length)' \
+    "$temporary/local-index.json" >/dev/null || fail "local entry IDs are not unique"
+
+if [ -n "$world_plan" ]; then
+    jq -r '.media.entries[]' "$world_plan" > "$temporary/selected-entries"
+else
+    jq -r '.entries[]' "$collection" > "$temporary/selected-entries"
+    jq -r '.[].id' "$temporary/local-index.json" >> "$temporary/selected-entries"
+fi
+
+[ -s "$temporary/selected-entries" ] || fail "media selection is empty"
+[ "$(sort "$temporary/selected-entries" | uniq | wc -l | tr -d ' ')" = "$(wc -l < "$temporary/selected-entries" | tr -d ' ')" ] ||
+    fail "media selection contains duplicate entry IDs"
+
+counter=0
+while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    entry_path=$(jq -r --arg id "$id" '.entries[] | select(.id == $id) | .path' "$index")
+    local_path=$(jq -r --arg id "$id" '.[] | select(.id == $id) | .path' "$temporary/local-index.json")
+    if [ -n "$entry_path" ] && [ -n "$local_path" ]; then
+        fail "entry ID is ambiguous: $id"
+    elif [ -n "$entry_path" ]; then
+        case "$entry_path" in catalog/entries/*.json) ;; *) fail "entry path is unsafe: $id" ;; esac
+        entry=$catalog_root/$entry_path
+    elif [ -n "$local_path" ]; then
+        entry=$repo_root/$local_path
+    else
+        fail "selected entry is absent from Catalog and local entries: $id"
+    fi
+    if [ ! -f "$entry" ] || [ -L "$entry" ]; then
+        fail "entry file is not readable: $id"
+    fi
+    actual_id=$(jq -er '.id' "$entry")
+    [ "$actual_id" = "$id" ] || fail "index and entry IDs differ: $id"
+    counter=$((counter + 1))
+    cp "$entry" "$temporary/entries/$(printf '%03d' "$counter")-$id.json"
+done < "$temporary/selected-entries"
 
 if [ "$counter" -gt 0 ]; then
     jq -s '.' "$temporary"/entries/*.json > "$temporary/entries.json"
@@ -154,10 +212,12 @@ jq -n \
     --slurpfile collection "$collection" \
     --slurpfile bootloader "$bootloader" \
     --slurpfile entries "$temporary/entries.json" \
+    --slurpfile world "$temporary/world.json" \
     --arg revision "$revision" \
     --arg catalog_tree "$catalog_tree" '
   ($composition[0]) as $c |
-  {
+  ($entries[0] | map(del(.schema_version))) as $selected |
+  ({
     schema_version: 1,
     product: $c.product,
     catalog: {
@@ -167,12 +227,20 @@ jq -n \
       path: $c.catalog.path,
       collection: $c.collection
     },
-    usb: $c.usb,
+    usb: ($c.usb |
+      .default_language =
+        (if $world[0] == null then .default_language
+         elif $world[0].media.language == "ko-KR" then "ko_KR"
+         else "en_US" end) |
+      .enrollment_reserve_mib =
+        (if any($selected[]; .profile_adapter == "dns-appliance")
+         then .enrollment_reserve_mib else 0 end)),
     bootloader: ($bootloader[0] | del(.schema_version)),
     groups: $collection[0].groups,
-    entries: ($entries[0] | map(del(.schema_version))),
+    entries: $selected,
     bundles: $c.bundles
-  }
+  } |
+  if $world[0] == null then . else .world = $world[0] end)
 ' > "$temporary/catalog.json"
 
 "$script_dir/verify-catalog" "$temporary/catalog.json" >/dev/null

@@ -7,6 +7,17 @@ services, selected installation media, and safety policy.
 The mutable draft is [`drafts/gujo-home/world.yaml`](drafts/gujo-home/world.yaml).
 Editing it does not create a USB or authorize a destructive operation.
 
+Validate and inspect the selected media from the repository root:
+
+```sh
+./device-os world validate
+./device-os world plan
+./device-os world simulate
+```
+
+When multiple drafts or media definitions exist, select them with
+`DEVICE_OS_WORLD=<slug>` and `DEVICE_OS_MEDIA=<id>`.
+
 ## Accumulating physical USB generations
 
 The World contract assigns every successfully verified physical USB creation a
@@ -43,7 +54,7 @@ Generated images, caches, credentials, recovery material, private keys, and raw
 hardware identifiers do not belong in Git.
 
 The monorepo commit replaces the former cross-repository Installer and Catalog
-pins. A resolved plan and completed generation must record that commit and the
-embedded Catalog tree identity. The physical publication transaction is not yet
-implemented; do not claim that a World was written until the command, readback,
-and generation evidence exist.
+pins. The resolved media plan records that commit, the embedded Catalog tree,
+and the validated World plan. The physical generation-publication transaction
+is not yet implemented; do not claim that a completed generation exists until
+the write, readback, and generation evidence exist.

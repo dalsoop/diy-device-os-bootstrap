@@ -6,13 +6,12 @@ verified Korean-first Ventoy USB.
 ## Human workflow
 
 ```sh
-./device-os available
-./device-os include pop-os
-./device-os exclude pop-os
-./device-os capacity --capacity 16GB
-./device-os simulate
-./device-os prepare
-sudo ./device-os write --device /dev/sdX ...
+./device-os world validate
+./device-os world available
+./device-os world capacity --capacity 16GB
+./device-os world simulate
+./device-os world prepare
+sudo ./device-os world write --device /dev/sdX ...
 ```
 
 `available`, `plan`, `capacity`, and `simulate` do not write a block device.
@@ -34,7 +33,7 @@ and verifies the image body while automatic mounting is impossible, commits and
 verifies the first MiB last, then unmounts and ejects. GPT images are rejected.
 Creating the full-disk image remains a separate build step. This repository does
 not currently provide a Linux/QEMU builder for that image, and Ventoy does not
-provide a native macOS installer. Use the Linux `./device-os write` workflow for
+provide a native macOS installer. Use the Linux `./device-os world write` workflow for
 complete USB assembly until a full-disk image builder is implemented.
 
 `capacity` sums selected image sizes, the enrollment reserve, and configured
@@ -48,8 +47,9 @@ fixed reserve and overhead already prove the target is too small.
 
 | Input | Ownership |
 | --- | --- |
-| `composition.json` | Catalog URL and commit, USB properties, local entries, bundles |
-| `../collections/device-os.json` | Selected public IDs and menu groups |
+| `../../world/drafts/<slug>/world.yaml` | User-selected entry IDs, language, and safety policy |
+| `composition.json` | Catalog location, USB properties, local entries, bundles |
+| `../collections/device-os.json` | Menu groups and contributor reference selection |
 | `local-entries/*.json` | Installer-owned profiles such as the DNS installer |
 | Sibling Catalog | Public bootloader and OS metadata |
 

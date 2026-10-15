@@ -4,8 +4,8 @@
 
 Keep public media metadata in the Catalog, shared execution behavior in the
 Installer, and user-owned selection and policy in the World Playbook. The
-current Installer-local composition remains a reference surface until external
-World input is implemented. Avoid product-name branches in shared media paths.
+Installer-local collection remains a contributor reference and menu-group
+surface. Avoid product-name branches in shared media paths.
 A new entry using an existing contract changes data; a new source strategy or
 profile adapter changes code and must have explicit success and rejection
 coverage.

@@ -91,7 +91,7 @@ target, the root disk, a missing serial, a checksum mismatch, insufficient
 capacity, or an inexact device-and-serial confirmation:
 
 ```sh
-sudo ./device-os write \
+sudo ./device-os world write \
   --device /dev/sdX \
   --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
   --runtime-manifest dns-appliance=/absolute/path/build-manifest.json \

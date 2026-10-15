@@ -7,15 +7,25 @@ composition=$repo_root/usb-media/composition.json
 collection=$(jq -er '.collection' "$composition")
 collection=$repo_root/$collection
 resolved=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
+world_plan=${DEVICE_OS_WORLD_PLAN:-$repo_root/work/device-os/world.json}
 
 usage() {
     cat <<'EOF'
 Gujo Homelab Device Bootstrap
 
 Usage:
+  ./device-os world validate             Validate the selected World and media
+  ./device-os world available            List Catalog entries and World selection
+  ./device-os world plan                 Show World-selected USB contents
+  ./device-os world capacity [options]   Check a size or physical device
+  ./device-os world simulate             Run without downloads or disk writes
+  ./device-os world prepare              Download and verify World-selected images
+  sudo ./device-os world write <options> Flash a verified removable USB on Linux
+
+Reference/contributor commands:
   ./device-os available                 List available catalog entries
-  ./device-os include <id>              Add an entry to the default USB
-  ./device-os exclude <id>              Remove an entry from the default USB
+  ./device-os include <id>              Add an entry to the reference collection
+  ./device-os exclude <id>              Remove an entry from the reference collection
   ./device-os plan                       Show contents and safety policy
   ./device-os capacity [options]         Check a size or physical device
   ./device-os simulate                   Run without downloads or disk writes
@@ -34,9 +44,9 @@ macOS example:
     --confirm 'ERASE /dev/disk5 SanDisk 3.2Gen1 30784094208'
 
 Capacity examples:
-  ./device-os capacity
-  ./device-os capacity --capacity 16GB
-  ./device-os capacity --capacity 16GB \
+  ./device-os world capacity
+  ./device-os world capacity --capacity 16GB
+  ./device-os world capacity --capacity 16GB \
     --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
     --runtime-manifest dns-appliance=/absolute/path/build-manifest.json
 EOF
@@ -53,8 +63,24 @@ resolve() {
     "$repo_root/usb-media/resolve-catalog" >/dev/null
 }
 
-show_plan() {
-    resolve
+resolve_world_plan() {
+    command -v ruby >/dev/null 2>&1 || fail "ruby is required for World commands"
+    set -- --output "$world_plan"
+    if [ -n "${DEVICE_OS_WORLD:-}" ]; then
+        set -- "$@" --world "$DEVICE_OS_WORLD"
+    fi
+    if [ -n "${DEVICE_OS_MEDIA:-}" ]; then
+        set -- "$@" --media "$DEVICE_OS_MEDIA"
+    fi
+    "$monorepo_root/world/bin/resolve-world" "$@"
+}
+
+resolve_world() {
+    resolve_world_plan
+    DEVICE_MEDIA_WORLD_PLAN=$world_plan "$repo_root/usb-media/resolve-catalog" >/dev/null
+}
+
+print_plan() {
     echo "Gujo Homelab OS USB contents"
     echo
     jq -r '.entries[] |
@@ -64,8 +90,14 @@ show_plan() {
        else "live environment" end) +
       "] " + .menu_alias' "$resolved"
     echo
+    if jq -e 'has("world")' "$resolved" >/dev/null; then
+        echo "World: $(jq -r '.world.world.name + " (" + .world.world.slug + ")' "$resolved")"
+        echo "Media definition: $(jq -r '.world.media.id' "$resolved")"
+    else
+        echo "Selection: Installer reference collection"
+    fi
     echo "USB label: $(jq -r '.usb.data_label' "$resolved")"
-    echo "Default boot-menu language: Korean"
+    echo "Default boot-menu language: $(jq -r '.usb.default_language' "$resolved")"
     echo "Monorepo commit: $(jq -r '.catalog.revision' "$resolved")"
     echo "Catalog tree: $(jq -r '.catalog.tree' "$resolved")"
     echo "Automatic menu timeout: disabled"
@@ -75,17 +107,37 @@ show_plan() {
     fi
 }
 
+show_plan() {
+    resolve
+    print_plan
+}
+
+show_world_plan() {
+    resolve_world
+    print_plan
+}
+
+show_available() {
+    selected=$1
+    catalog_root=${DEVICE_MEDIA_CATALOG_DIR:-$monorepo_root/$(jq -r '.catalog.path' "$composition")}
+    index=$catalog_root/$(jq -r '.catalog.index' "$composition")
+    jq -r --argjson selected "$selected" '
+      .entries[] as $entry |
+      (if ($selected | index($entry.id)) then "[included] " else "[available] " end) + $entry.id
+    ' "$index"
+    if jq -e '.entries[] | select(.id == "dns-appliance")' "$resolved" >/dev/null; then
+        echo "[included] dns-appliance (World-local profile)"
+    else
+        echo "[available] dns-appliance (World-local profile)"
+    fi
+}
+
 command=${1:-help}
 case "$command" in
     available)
         resolve
         selected=$(jq -c '.entries' "$collection")
-        catalog_root=${DEVICE_MEDIA_CATALOG_DIR:-$monorepo_root/$(jq -r '.catalog.path' "$composition")}
-        index=$catalog_root/$(jq -r '.catalog.index' "$composition")
-        jq -r --argjson selected "$selected" '
-          .entries[] as $entry |
-          (if ($selected | index($entry.id)) then "[included] " else "[available] " end) + $entry.id
-        ' "$index"
+        show_available "$selected"
         ;;
     include)
         id=${2:-}
@@ -139,6 +191,58 @@ case "$command" in
     write-image-macos)
         shift
         exec "$repo_root/usb-media/write-image-macos" "$@"
+        ;;
+    world)
+        shift
+        world_command=${1:-help}
+        case "$world_command" in
+            validate)
+                resolve_world_plan
+                echo "World contract: valid"
+                echo "Resolved World: $(jq -r '.world.slug' "$world_plan")"
+                echo "Selected media: $(jq -r '.media.id' "$world_plan")"
+                ;;
+            available)
+                resolve_world
+                selected=$(jq -c '.world.media.entries' "$resolved")
+                show_available "$selected"
+                ;;
+            plan)
+                show_world_plan
+                ;;
+            capacity|size)
+                shift
+                resolve_world
+                USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/calculate-capacity" "$@"
+                ;;
+            simulate)
+                echo "[1/4] Validate and resolve the World."
+                resolve_world
+                echo "[2/4] Resolve World-selected Catalog and local entries."
+                print_plan
+                echo
+                echo "[3/4] Image download and SHA-256 verification: skipped"
+                echo "[4/4] USB erase and flash: skipped"
+                echo
+                echo "Simulation complete: no network image or disk was changed."
+                ;;
+            prepare)
+                resolve_world
+                USB_MEDIA_CATALOG=$resolved "$repo_root/usb-media/fetch-images"
+                ;;
+            write)
+                shift
+                resolve_world
+                USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/write-usb-linux" "$@"
+                ;;
+            help|-h|--help)
+                usage
+                ;;
+            *)
+                usage >&2
+                exit 2
+                ;;
+        esac
         ;;
     help|-h|--help)
         usage

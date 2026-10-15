@@ -32,7 +32,9 @@ for file in \
     management/dns-appliance-status-monitor/start \
     tests/media-catalog-simulation.sh \
     tests/macos-writer-simulation.sh \
-    tests/management-simulation.sh; do
+    tests/management-simulation.sh \
+    ../world/bin/resolve-world \
+    ../world/tests/world-contract-simulation.rb; do
     [ -x "$repo_root/$file" ] || {
         echo "repository-contract: $file must be executable" >&2
         exit 1
@@ -52,6 +54,8 @@ for required in \
     docs/tracking/decisions/0002-pinned-declarative-catalog.md \
     management/dns-appliance-status-monitor/config.json \
     management/dns-appliance-status-monitor/server.py \
+    ../world/world-playbook.yaml \
+    ../world/drafts/gujo-home/world.yaml \
     ../.github/workflows/ci.yml; do
     [ -r "$repo_root/$required" ] || {
         echo "repository-contract: missing $required" >&2

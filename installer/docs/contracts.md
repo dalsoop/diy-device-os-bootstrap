@@ -6,6 +6,13 @@
 
 | Command | State change |
 | --- | --- |
+| `world validate` | Validates and resolves the selected World without downloading or writing |
+| `world available` | Prints public and local entries against the World selection |
+| `world plan` | Resolves and prints World-selected media and policy |
+| `world capacity [options]` | Calculates World-selected media and target fit without writing |
+| `world simulate` | Reports skipped download/write phases for the World selection |
+| `world prepare` | Downloads and verifies World-selected locked artifacts |
+| `world write ...` | Destructively assembles the confirmed removable USB from the World selection |
 | `available` | Reads/resolves Catalog and prints selection state |
 | `include <id>` | Adds a valid public ID to the collection |
 | `exclude <id>` | Removes an ID from the collection |
@@ -55,13 +62,22 @@ segments. Catalog code is never part of the contract.
 
 ## Collection and resolved plan
 
-The collection has a stable ID, display name, unique groups, and unique selected
-entry IDs. Group paths and IDs are unique.
+The collection has a stable ID, display name, unique groups, and a unique
+contributor reference selection. Group paths and IDs are unique. In the
+ordinary command path, the resolved World supplies the ordered entry IDs while
+the collection supplies the menu groups.
 
 The resolver emits a versioned plan containing the monorepo commit, Catalog Git
 tree identity and path, product, USB properties, one bootloader, groups,
-selected public plus local entries, and bundles. Entry IDs and destinations are
-unique. Every entry destination belongs to its declared group.
+selected public or local entries, and bundles. A World-driven plan additionally
+embeds the validated versioned World plan, and its ordered entry IDs must match
+the resolved entries exactly. Entry IDs and destinations are unique. Every
+entry destination belongs to its declared group. Public and local registries
+may not expose the same ID.
+
+The DNS enrollment reserve must be positive when a DNS adapter is present and
+zero when it is absent. World language `ko-KR` maps to Ventoy `ko_KR`; `en-US`
+maps to `en_US`.
 
 The current entry contract accepts:
 
