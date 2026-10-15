@@ -112,7 +112,10 @@ begin
   timezone = text(playbook_spec["timezone"], "WorldPlaybook.spec.timezone")
   fail_contract("unsupported World timezone") unless timezone == "Asia/Seoul"
   drafts = list(playbook_spec["drafts"], "WorldPlaybook.spec.drafts")
-  draft_ids = unique_ids(drafts, "drafts")
+  draft_ids = drafts.map.with_index do |draft_item, index|
+    safe_id(mapping(draft_item, "drafts[#{index}]")["slug"], "drafts[#{index}].slug")
+  end
+  fail_contract("duplicate draft slug") unless draft_ids.uniq.length == draft_ids.length
   requested_world = options[:world]
   if requested_world.nil?
     fail_contract("select a World with --world because multiple drafts exist") unless drafts.length == 1
