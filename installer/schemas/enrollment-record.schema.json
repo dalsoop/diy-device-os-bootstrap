@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/dalsoop/gujo-homelab-os-playbook/blob/main/installer/schemas/enrollment-record.schema.json",
+  "$id": "https://github.com/dalsoop/gujo-homelab-device-bootstrap/blob/main/installer/schemas/enrollment-record.schema.json",
   "title": "DNS appliance public enrollment record",
   "type": "object",
   "additionalProperties": false,

@@ -1,10 +1,14 @@
-# Gujo Homelab OS Playbook
+# Gujo Homelab Device Bootstrap
 
-[![CI](https://github.com/dalsoop/gujo-homelab-os-playbook/actions/workflows/ci.yml/badge.svg)](https://github.com/dalsoop/gujo-homelab-os-playbook/actions/workflows/ci.yml)
+[![CI](https://github.com/dalsoop/gujo-homelab-device-bootstrap/actions/workflows/ci.yml/badge.svg)](https://github.com/dalsoop/gujo-homelab-device-bootstrap/actions/workflows/ci.yml)
 
-This user-owned playbook holds the complete source for a homelab World: operator intent,
-public operating-system metadata, guarded installation-media tooling, and the
-append-only record of verified physical USB generations.
+This user-owned device bootstrap holds the complete source for a homelab World:
+operator intent, public operating-system metadata, guarded installation-media
+tooling, and the append-only record of verified physical USB generations.
+
+The repository and product are **Gujo Homelab Device Bootstrap**. The operator
+command remains `device-os`, and the generated removable-media product remains
+**Gujo Homelab OS USB**.
 
 This monorepo replaces the former World Playbook, OS Installer, and OS Catalog
 repository split. The boundaries still exist as modules, but users clone or
@@ -21,8 +25,8 @@ consumers in one pull request.
 Clone one repository:
 
 ```sh
-git clone https://github.com/dalsoop/gujo-homelab-os-playbook.git
-cd gujo-homelab-os-playbook
+git clone https://github.com/dalsoop/gujo-homelab-device-bootstrap.git
+cd gujo-homelab-device-bootstrap
 ```
 
 Follow the [Getting Started guide](docs/getting-started.md) for the implemented
@@ -72,7 +76,7 @@ generations are never edited or replaced.
 ## Repository map
 
 ```text
-gujo-homelab-os-playbook/
+gujo-homelab-device-bootstrap/
 ├── device-os              root operator command
 ├── world/                 user intent and immutable USB generations
 │   ├── drafts/            mutable desired state

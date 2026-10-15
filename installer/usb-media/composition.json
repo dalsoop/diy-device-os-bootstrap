@@ -2,7 +2,7 @@
   "schema_version": 1,
   "product": {
     "name": "Gujo Homelab OS USB",
-    "repository": "https://github.com/dalsoop/gujo-homelab-os-playbook"
+    "repository": "https://github.com/dalsoop/gujo-homelab-device-bootstrap"
   },
   "catalog": {
     "kind": "workspace",

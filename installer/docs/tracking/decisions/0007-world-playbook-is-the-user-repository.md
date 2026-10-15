@@ -23,7 +23,7 @@ either repository. Installer and Catalog revisions are pinned by the Playbook.
 The canonical template is:
 
 ```text
-https://github.com/dalsoop/gujo-homelab-os-playbook/tree/main/world
+https://github.com/dalsoop/gujo-homelab-device-bootstrap/tree/main/world
 ```
 
 The current Installer-internal composition remains a reference implementation

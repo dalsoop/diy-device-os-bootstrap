@@ -1,8 +1,8 @@
 # World Module
 
-This module is the user-owned source of homelab intent inside the Gujo Homelab
-OS Playbook monorepo. Installer implementation and public Catalog data remain in sibling
-modules and are not duplicated here.
+This module is the user-owned source of homelab intent inside Gujo Homelab
+Device Bootstrap. Installer implementation and public Catalog data remain in
+sibling modules and are not duplicated here.
 
 ## Source-of-truth boundaries
 

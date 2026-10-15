@@ -8,8 +8,8 @@ Debian/Ubuntu:
 ```sh
 sudo apt-get update
 sudo apt-get install -y git jq shellcheck
-git clone https://github.com/dalsoop/gujo-homelab-os-playbook.git
-cd gujo-homelab-os-playbook/catalog
+git clone https://github.com/dalsoop/gujo-homelab-device-bootstrap.git
+cd gujo-homelab-device-bootstrap/catalog
 ```
 
 Catalog operations do not require root after package installation and must not

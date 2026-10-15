@@ -2,7 +2,7 @@
 
 ## Product model
 
-The Installer is the execution module inside the single Gujo Homelab OS Playbook repository.
+The Installer is the execution module inside the single Gujo Homelab Device Bootstrap repository.
 The sibling World owns selected media, local profiles, hardware bindings, USB
 labels, safety policy, and append-only USB generations. Public media
 metadata is contributed to the Catalog rather than copied into either the

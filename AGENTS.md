@@ -1,8 +1,8 @@
-# Gujo Homelab OS Playbook
+# Gujo Homelab Device Bootstrap
 
-This user-owned monorepo playbook is the single source of truth for one homelab World, public OS
-metadata, guarded installation-media tooling, and append-only physical USB
-generation evidence.
+This user-owned device-bootstrap monorepo is the single source of truth for one
+homelab World, public OS metadata, guarded installation-media tooling, and
+append-only physical USB generation evidence.
 
 ## Source-of-truth boundaries
 

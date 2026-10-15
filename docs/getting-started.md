@@ -26,9 +26,9 @@ a USB was written or a machine was installed.
 Create a GitHub fork for your homelab, then clone that fork:
 
 ```sh
-git clone https://github.com/<your-account>/gujo-homelab-os-playbook.git
-cd gujo-homelab-os-playbook
-git remote add upstream https://github.com/dalsoop/gujo-homelab-os-playbook.git
+git clone https://github.com/<your-account>/gujo-homelab-device-bootstrap.git
+cd gujo-homelab-device-bootstrap
+git remote add upstream https://github.com/dalsoop/gujo-homelab-device-bootstrap.git
 ```
 
 Keep personal intent in your fork. Before adopting an upstream change, review
