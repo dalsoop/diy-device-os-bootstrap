@@ -1,0 +1,51 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+enrollment=
+identity=
+output=
+usage() {
+    echo "usage: $0 --enrollment /Volumes/DNS-ENROLL --identity /secure/age-key.txt --output /secure/dns-bootstrap" >&2
+    exit 2
+}
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --enrollment) enrollment=${2:-}; shift 2 ;;
+        --identity) identity=${2:-}; shift 2 ;;
+        --output) output=${2:-}; shift 2 ;;
+        *) usage ;;
+    esac
+done
+if ! { [ -d "$enrollment" ] && [ -s "$identity" ] && [ -n "$output" ]; }; then
+    usage
+fi
+install -d -m 0700 "$output"
+
+for role in dns01 dns02 dns03; do
+    active=$enrollment/records/$role/ACTIVE
+    [ -s "$active" ] || { echo "import-enrollment: $role is incomplete" >&2; exit 1; }
+    generation=$(sed -n '1p' "$active")
+    record=$enrollment/records/$role/$generation
+    if ! { [ -s "$record/COMPLETE" ] && [ -s "$record/public.json" ] &&
+        [ -s "$record/recovery.tar.age" ]; }; then
+        echo "import-enrollment: incomplete record for $role/$generation" >&2
+        exit 1
+    fi
+    jq -e --arg role "$role" '.hostname == $role and .health.dns_udp == "healthy" and .health.dns_tcp == "healthy"' \
+        "$record/public.json" >/dev/null || {
+            echo "import-enrollment: invalid public record for $role" >&2
+            exit 1
+        }
+    temporary=$(mktemp -d "${TMPDIR:-/tmp}/dns-enrollment.XXXXXX")
+    trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+    age -d -i "$identity" "$record/recovery.tar.age" | tar -C "$temporary" -xf -
+    install -m 0600 "$temporary/secrets/operator-password" "$output/$role-operator-password"
+    install -m 0600 "$temporary/secrets/technitium-admin-password" "$output/$role-admin-password"
+    install -m 0600 "$temporary/secrets/technitium-static-token" "$output/$role-static-token"
+    install -m 0644 "$record/public.json" "$output/$role-public.json"
+    rm -rf "$temporary"
+    trap - EXIT HUP INT TERM
+done
+
+echo "import-enrollment: verified and imported all three nodes into $output"

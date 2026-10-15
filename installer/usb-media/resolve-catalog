@@ -1,0 +1,184 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+monorepo_root=$(CDPATH='' cd -- "$repo_root/.." && pwd)
+composition=${DEVICE_MEDIA_COMPOSITION:-$script_dir/composition.json}
+output=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
+
+fail() {
+    echo "resolve-catalog: $*" >&2
+    exit 1
+}
+
+for command in git jq; do
+    command -v "$command" >/dev/null 2>&1 || fail "$command is required"
+done
+[ -r "$composition" ] || fail "composition is not readable: $composition"
+
+jq -e '
+  def safe_rel:
+    type == "string" and
+    test("^[A-Za-z0-9][A-Za-z0-9._+!/-]*$") and
+    (startswith("/") | not) and
+    (split("/") | all(. != "" and . != "." and . != ".."));
+  .schema_version == 1 and
+  (.product.name | type == "string" and length > 0) and
+  .product.repository == "https://github.com/dalsoop/gujo-homelab" and
+  .catalog.kind == "workspace" and
+  (.catalog.path | safe_rel) and
+  (.catalog.index | safe_rel) and
+  (.catalog.bootloader | test("^[a-z0-9][a-z0-9-]*$")) and
+  (.collection | safe_rel) and
+  (.local_entries | type == "array" and all(.[]; safe_rel)) and
+  (.bundles | type == "array")
+' "$composition" >/dev/null || fail "usb-media/composition.json violates its contract"
+
+catalog_path=$(jq -er '.catalog.path' "$composition")
+index_path=$(jq -er '.catalog.index' "$composition")
+bootloader_id=$(jq -er '.catalog.bootloader' "$composition")
+collection_path=$(jq -er '.collection' "$composition")
+collection=$repo_root/$collection_path
+[ -r "$collection" ] || fail "collection is not readable: $collection_path"
+
+jq -e '
+  def safe_id: type == "string" and test("^[a-z0-9][a-z0-9-]*$");
+  def safe_rel:
+    type == "string" and
+    test("^[A-Za-z0-9][A-Za-z0-9._+!/-]*$") and
+    (startswith("/") | not) and
+    (split("/") | all(. != "" and . != "." and . != ".."));
+  .schema_version == 1 and (.id | safe_id) and
+  (.name | type == "string" and length > 0) and
+  (.groups | type == "array" and length > 0) and
+  (.entries | type == "array") and
+  (all(.groups[]; (.id | safe_id) and (.path | safe_rel) and (.menu_alias | type == "string" and length > 0))) and
+  (all(.entries[]; safe_id)) and
+  (([.groups[].id] | length) == ([.groups[].id] | unique | length)) and
+  (([.groups[].path] | length) == ([.groups[].path] | unique | length)) and
+  ((.entries | length) == (.entries | unique | length))
+' "$collection" >/dev/null || fail "collection violates its contract: $collection_path"
+
+if [ -n "${DEVICE_MEDIA_CATALOG_DIR:-}" ]; then
+    catalog_root=$DEVICE_MEDIA_CATALOG_DIR
+    [ -d "$catalog_root" ] || fail "catalog directory does not exist: $catalog_root"
+    [ "${DEVICE_MEDIA_ALLOW_UNPINNED_CATALOG:-0}" = 1 ] ||
+        fail "an external catalog fixture requires DEVICE_MEDIA_ALLOW_UNPINNED_CATALOG=1"
+    revision=0000000000000000000000000000000000000000
+    catalog_tree=0000000000000000000000000000000000000000
+else
+    catalog_root=$monorepo_root/$catalog_path
+    [ -d "$catalog_root" ] || fail "workspace catalog is missing: $catalog_path"
+    [ -z "$(git -C "$monorepo_root" status --porcelain -- "$catalog_path/catalog" "$catalog_path/schemas")" ] ||
+        fail "workspace catalog has uncommitted changes"
+    revision=$(git -C "$monorepo_root" rev-parse HEAD 2>/dev/null) ||
+        fail "monorepo commit is unavailable"
+    catalog_tree=$(git -C "$monorepo_root" rev-parse "HEAD:$catalog_path/catalog" 2>/dev/null) ||
+        fail "catalog tree identity is unavailable"
+fi
+
+index=$catalog_root/$index_path
+if [ ! -f "$index" ] || [ -L "$index" ]; then
+        fail "catalog index is not readable"
+fi
+jq -e '
+  def safe_id: type == "string" and test("^[a-z0-9][a-z0-9-]*$");
+  def safe_rel:
+    type == "string" and
+    test("^[A-Za-z0-9][A-Za-z0-9._+!/-]*$") and
+    (startswith("/") | not) and
+    (split("/") | all(. != "" and . != "." and . != ".."));
+  .schema_version == 1 and
+  (.bootloaders | type == "array" and all(.[]; (.id | safe_id) and (.path | safe_rel))) and
+  (.entries | type == "array" and all(.[]; (.id | safe_id) and (.path | safe_rel))) and
+  (([.bootloaders[].id] | length) == ([.bootloaders[].id] | unique | length)) and
+  (([.entries[].id] | length) == ([.entries[].id] | unique | length))
+' "$index" >/dev/null || fail "catalog index violates its contract"
+
+temporary=$(mktemp -d)
+cleanup() {
+    rm -rf "$temporary"
+}
+trap cleanup EXIT HUP INT TERM
+mkdir -p "$temporary/entries"
+
+bootloader_path=$(jq -er --arg id "$bootloader_id" '.bootloaders[] | select(.id == $id) | .path' "$index") ||
+    fail "bootloader is absent from the catalog: $bootloader_id"
+case "$bootloader_path" in catalog/bootloaders/*.json) ;; *) fail "bootloader path is unsafe" ;; esac
+bootloader=$catalog_root/$bootloader_path
+if [ ! -f "$bootloader" ] || [ -L "$bootloader" ]; then
+    fail "bootloader file is not readable"
+fi
+
+counter=0
+jq -r '.entries[]' "$collection" > "$temporary/selected-entries"
+while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    entry_path=$(jq -er --arg id "$id" '.entries[] | select(.id == $id) | .path' "$index") ||
+        fail "selected entry is absent from the catalog: $id"
+    case "$entry_path" in catalog/entries/*.json) ;; *) fail "entry path is unsafe: $id" ;; esac
+    entry=$catalog_root/$entry_path
+    if [ ! -f "$entry" ] || [ -L "$entry" ]; then
+        fail "entry file is not readable: $id"
+    fi
+    actual_id=$(jq -er '.id' "$entry")
+    [ "$actual_id" = "$id" ] || fail "index and entry IDs differ: $id"
+    counter=$((counter + 1))
+    cp "$entry" "$temporary/entries/$(printf '%03d' "$counter")-$id.json"
+done < "$temporary/selected-entries"
+
+jq -r '.local_entries[]' "$composition" > "$temporary/local-entries"
+while IFS= read -r local_path; do
+    [ -n "$local_path" ] || continue
+    local_entry=$repo_root/$local_path
+    if [ ! -f "$local_entry" ] || [ -L "$local_entry" ]; then
+        fail "local entry is not readable: $local_path"
+    fi
+    id=$(jq -er '.id' "$local_entry")
+    case "$id" in
+        ''|*[!a-z0-9-]*|-[a-z0-9-]*|*[!a-z0-9]) fail "local entry ID is unsafe: $id" ;;
+    esac
+    counter=$((counter + 1))
+    cp "$local_entry" "$temporary/entries/$(printf '%03d' "$counter")-$id.json"
+done < "$temporary/local-entries"
+
+if [ "$counter" -gt 0 ]; then
+    jq -s '.' "$temporary"/entries/*.json > "$temporary/entries.json"
+else
+    printf '[]\n' > "$temporary/entries.json"
+fi
+
+jq -n \
+    --slurpfile composition "$composition" \
+    --slurpfile collection "$collection" \
+    --slurpfile bootloader "$bootloader" \
+    --slurpfile entries "$temporary/entries.json" \
+    --arg revision "$revision" \
+    --arg catalog_tree "$catalog_tree" '
+  ($composition[0]) as $c |
+  {
+    schema_version: 1,
+    product: $c.product,
+    catalog: {
+      repository: $c.product.repository,
+      revision: $revision,
+      tree: $catalog_tree,
+      path: $c.catalog.path,
+      collection: $c.collection
+    },
+    usb: $c.usb,
+    bootloader: ($bootloader[0] | del(.schema_version)),
+    groups: $collection[0].groups,
+    entries: ($entries[0] | map(del(.schema_version))),
+    bundles: $c.bundles
+  }
+' > "$temporary/catalog.json"
+
+"$script_dir/verify-catalog" "$temporary/catalog.json" >/dev/null
+mkdir -p "$(dirname -- "$output")"
+mv "$temporary/catalog.json" "$output"
+
+echo "Resolved catalog: $output"
+echo "Monorepo revision: $revision"
+echo "Catalog tree: $catalog_tree"

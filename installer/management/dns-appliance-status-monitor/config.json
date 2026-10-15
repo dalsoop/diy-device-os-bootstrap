@@ -1,0 +1,8 @@
+{
+  "refresh_seconds": 10,
+  "nodes": [
+    { "name": "dns01", "address": "10.0.5.1", "query": "dns01.home.arpa" },
+    { "name": "dns02", "address": "10.0.5.2", "query": "dns02.home.arpa" },
+    { "name": "dns03", "address": "10.0.5.3", "query": "dns03.home.arpa" }
+  ]
+}

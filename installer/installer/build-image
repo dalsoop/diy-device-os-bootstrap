@@ -1,0 +1,162 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+builder_dir="$script_dir/simple-cdd"
+generated_dir="$builder_dir/generated"
+inventory_dir=${DNS_APPLIANCE_INVENTORY_DIR:-$repo_root/inventory/local}
+authorized_keys=${DNS_APPLIANCE_AUTHORIZED_KEYS:-$script_dir/inputs/operator-authorized-keys}
+age_recipient=${DNS_APPLIANCE_AGE_RECIPIENT:-$script_dir/inputs/age-recipient}
+cache_dir=${DNS_APPLIANCE_CACHE_DIR:-$repo_root/cache}
+artifact_dir=${DNS_APPLIANCE_ARTIFACT_DIR:-$repo_root/artifacts}
+# shellcheck disable=SC1091
+. "$repo_root/build/locks/sources.env"
+technitium_archive=$cache_dir/technitium-dns-$TECHNITIUM_VERSION-amd64.oci.tar
+tailscale_archive=$cache_dir/tailscale-$TAILSCALE_VERSION-amd64.tgz
+
+fail() {
+    echo "build-image: $*" >&2
+    exit 1
+}
+
+[ "$(uname -s)" = Linux ] || fail "build on an amd64 Debian 13 host"
+[ "$(uname -m)" = x86_64 ] || fail "amd64 builder required"
+[ -r /etc/os-release ] || fail "cannot identify builder OS"
+# shellcheck source=/dev/null
+. /etc/os-release
+[ "${ID:-}" = debian ] || fail "Debian builder required"
+[ "${VERSION_CODENAME:-}" = trixie ] || fail "Debian 13 trixie builder required"
+command -v build-simple-cdd >/dev/null 2>&1 || fail "install the simple-cdd package"
+command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
+command -v skopeo >/dev/null 2>&1 || fail "skopeo is required"
+
+"$repo_root/build/verify-locks"
+installed_simple_cdd=$(dpkg-query -W -f='${Version}' simple-cdd 2>/dev/null || true)
+case "$installed_simple_cdd" in
+    "$SIMPLE_CDD_VERSION"|"$SIMPLE_CDD_VERSION"+*) ;;
+    *) fail "simple-cdd $SIMPLE_CDD_VERSION required; found ${installed_simple_cdd:-missing}" ;;
+esac
+
+[ -r "$authorized_keys" ] || fail "missing operator public key: $authorized_keys"
+awk '
+    /^[[:space:]]*(#|$)/ { next }
+    $1 ~ /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-)/ { found=1; next }
+    { bad=1 }
+    END { exit !(found && !bad) }
+' "$authorized_keys" || fail "authorized-keys input must contain only SSH public keys"
+
+[ -r "$age_recipient" ] || fail "missing age recipient: $age_recipient"
+recipient=$(awk '!/^[[:space:]]*(#|$)/ { print; exit }' "$age_recipient")
+printf '%s' "$recipient" | grep -Eq '^age1[0-9a-z]{58}$' ||
+    fail "age recipient must contain one native age1 recipient"
+
+[ -s "$technitium_archive" ] ||
+    fail "missing pinned OCI archive; run installer/fetch-locked-sources"
+archive_digest=$(skopeo inspect --format '{{.Digest}}' "oci-archive:$technitium_archive")
+[ "$archive_digest" = "$TECHNITIUM_AMD64_DIGEST" ] ||
+    fail "Technitium OCI archive digest mismatch: $archive_digest"
+[ -s "$tailscale_archive" ] ||
+    fail "missing pinned Tailscale archive; run installer/fetch-locked-sources"
+printf '%s  %s\n' "$TAILSCALE_AMD64_SHA256" "$tailscale_archive" |
+    sha256sum -c - >/dev/null || fail "Tailscale archive SHA-256 mismatch"
+
+mkdir -p "$generated_dir"
+for old in dns01.conf dns02.conf dns03.conf operator-authorized-keys age-recipient \
+    technitium.oci.tar tailscale.tgz sources.env enrollment-record.schema.json; do
+    rm -f "$generated_dir/$old"
+done
+
+required_hashes='expected_product_name_sha256 expected_product_sku_sha256 expected_system_serial_sha256 expected_system_uuid_sha256 expected_mac_sha256 expected_disk_model_sha256 expected_disk_serial_sha256'
+enabled_count=0
+
+for role in dns01 dns02 dns03; do
+    source_file="$inventory_dir/$role.conf"
+    [ -r "$source_file" ] || fail "missing inventory: $source_file"
+    grep -q "^role=$role$" "$source_file" || fail "$role has the wrong role field"
+    for key in address netmask gateway dns_servers domain lan_cidr management_cidr cluster_domain; do
+        value=$(awk -F= -v wanted="$key" '$1 == wanted { print $2 }' "$source_file")
+        [ -n "$value" ] || fail "$role is missing $key"
+    done
+    enabled=$(awk -F= '$1 == "destructive_install_enabled" { print $2 }' "$source_file")
+    case "$enabled" in
+        true)
+            enabled_count=$((enabled_count + 1))
+            grep -q 'REPLACE_' "$source_file" && fail "$role contains placeholders"
+            for key in $required_hashes; do
+                value=$(awk -F= -v wanted="$key" '$1 == wanted { print $2 }' "$source_file")
+                printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}$' ||
+                    fail "$role has an invalid $key"
+            done
+            min_bytes=$(awk -F= '$1 == "expected_disk_min_bytes" { print $2 }' "$source_file")
+            case "$min_bytes" in
+                ''|*[!0-9]*) fail "$role has an invalid expected_disk_min_bytes" ;;
+            esac
+            [ "$min_bytes" -gt 0 ] || fail "$role disk size must be greater than zero"
+            ;;
+        false) ;;
+        *) fail "$role has an invalid destructive_install_enabled value" ;;
+    esac
+    install -m 0644 "$source_file" "$generated_dir/$role.conf"
+done
+
+[ "$enabled_count" -gt 0 ] || fail "all roles remain erase-disabled"
+
+install -m 0644 "$authorized_keys" "$generated_dir/operator-authorized-keys"
+printf '%s\n' "$recipient" > "$generated_dir/age-recipient"
+install -m 0644 "$technitium_archive" "$generated_dir/technitium.oci.tar"
+install -m 0644 "$tailscale_archive" "$generated_dir/tailscale.tgz"
+install -m 0644 "$repo_root/build/locks/sources.env" "$generated_dir/sources.env"
+install -m 0644 "$repo_root/schemas/enrollment-record.schema.json" \
+    "$generated_dir/enrollment-record.schema.json"
+
+cd "$builder_dir"
+build-simple-cdd --conf simple-cdd.conf --profiles dns
+
+set -- images/*.iso
+[ -e "$1" ] || fail "Simple-CDD completed without an ISO"
+mkdir -p "$artifact_dir"
+sha256sum "$@" | tee "$artifact_dir/SHA256SUMS"
+
+iso=$1
+iso_sha256=$(sha256sum "$iso" | awk '{print $1}')
+archive_sha256=$(sha256sum "$technitium_archive" | awk '{print $1}')
+tailscale_sha256=$(sha256sum "$tailscale_archive" | awk '{print $1}')
+short_sha=$(printf '%s' "$iso_sha256" | cut -c1-16)
+build_id="debian-$DEBIAN_POINT_RELEASE-technitium-$TECHNITIUM_VERSION-$short_sha"
+
+jq -n \
+    --arg build_id "$build_id" \
+    --arg iso "$(basename "$iso")" \
+    --arg iso_sha256 "$iso_sha256" \
+    --arg debian "$DEBIAN_POINT_RELEASE" \
+    --arg snapshot "$DEBIAN_SNAPSHOT" \
+    --arg technitium "$TECHNITIUM_VERSION" \
+    --arg technitium_digest "$TECHNITIUM_AMD64_DIGEST" \
+    --arg technitium_archive_sha256 "$archive_sha256" \
+    --arg tailscale "$TAILSCALE_VERSION" \
+    --arg tailscale_archive_sha256 "$tailscale_sha256" \
+    '{schema_version:1,build_id:$build_id,iso:$iso,iso_sha256:$iso_sha256,debian_point_release:$debian,debian_snapshot:$snapshot,technitium_version:$technitium,technitium_image_digest:$technitium_digest,technitium_archive_sha256:$technitium_archive_sha256,tailscale_version:$tailscale,tailscale_archive_sha256:$tailscale_archive_sha256}' \
+    > "$artifact_dir/build-manifest.json"
+
+packages_file=$artifact_dir/debian-packages.txt
+find "$builder_dir/mirror" -type f -name Packages -exec awk '
+    /^Package: / { package=$2 }
+    /^Version: / { if (package != "") print package "=" $2; package="" }
+' {} + 2>/dev/null | LC_ALL=C sort -u > "$packages_file"
+
+package_hashes=$artifact_dir/debian-package-sha256s.txt
+find "$builder_dir/mirror" -type f \( -name '*.deb' -o -name '*.udeb' \) \
+    -exec sha256sum {} + 2>/dev/null |
+    sed "s#$builder_dir/mirror/##" | LC_ALL=C sort > "$package_hashes"
+
+jq -n \
+    --arg name "dns-appliance-installer-$build_id" \
+    --arg technitium "$TECHNITIUM_IMAGE@$TECHNITIUM_AMD64_DIGEST" \
+    --arg tailscale "$TAILSCALE_VERSION" \
+    --rawfile packages "$packages_file" \
+    '{spdxVersion:"SPDX-2.3",dataLicense:"CC0-1.0",SPDXID:"SPDXRef-DOCUMENT",name:$name,documentNamespace:("https://github.com/dalsoop/gujo-homelab/releases/"+$name),packages:([($packages|split("\n")[]|select(length>0))|{name:(split("=")[0]),versionInfo:(split("=")[1]),SPDXID:("SPDXRef-Package-"+(gsub("[^A-Za-z0-9.-]";"-"))),downloadLocation:"NOASSERTION",filesAnalyzed:false}]+[{name:"technitium-dns-server",versionInfo:$technitium,SPDXID:"SPDXRef-Technitium",downloadLocation:"NOASSERTION",filesAnalyzed:false},{name:"tailscale",versionInfo:$tailscale,SPDXID:"SPDXRef-Tailscale",downloadLocation:"NOASSERTION",filesAnalyzed:false}])}' \
+    > "$artifact_dir/sbom.spdx.json"
+
+echo "build manifest: $artifact_dir/build-manifest.json"
+echo "SBOM: $artifact_dir/sbom.spdx.json"

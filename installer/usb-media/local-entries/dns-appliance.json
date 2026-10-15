@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "dns-appliance",
+  "group": "dns",
+  "destination": "images/01-dns/dns-appliance-installer.iso",
+  "menu_alias": "DNS 서버 자동 설치 (HP 전용, 디스크 삭제 주의)",
+  "description_ko": "정확한 HP 인벤토리와 재설치 승인이 일치해야만 디스크 삭제를 허용한다.",
+  "description_en": "Guarded DNS installer; exact HP inventory and reinstall authorization are required.",
+  "boot_behavior": "guarded-unattended",
+  "profile_adapter": "dns-appliance",
+  "source": {
+    "kind": "runtime-artifact",
+    "manifest_digest_field": "iso_sha256",
+    "manifest_destination": "manifests/dns-build-manifest.json"
+  }
+}

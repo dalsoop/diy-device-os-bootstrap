@@ -1,0 +1,24 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+destination=${1:-}
+[ -n "$destination" ] || {
+    echo "usage: $0 /secure/backup-destination" >&2
+    exit 2
+}
+install -d -m 0700 "$destination"
+
+for role in dns01 dns02 dns03; do
+    address=${role/dns0/10.0.5.}
+    node_dir=$destination/$role
+    install -d -m 0700 "$node_dir"
+    rsync -a --ignore-existing --rsync-path='sudo rsync' \
+        "operator@$address:/var/backups/dns-appliance/*.zip.age" "$node_dir/"
+    find "$node_dir" -type f -name '*.zip.age' -size 0 -print -quit | grep -q . && {
+        echo "collect-backups: empty backup detected for $role" >&2
+        exit 1
+    }
+done
+
+echo "collect-backups: encrypted backups collected in $destination"

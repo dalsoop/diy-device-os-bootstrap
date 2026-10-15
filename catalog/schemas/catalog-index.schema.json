@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dalsoop/gujo-homelab/blob/main/catalog/schemas/catalog-index.schema.json",
+  "title": "Gujo Homelab OS Catalog Index",
+  "type": "object",
+  "required": ["schema_version", "name", "repository", "bootloaders", "entries"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "repository": { "type": "string", "format": "uri" },
+    "bootloaders": { "$ref": "#/$defs/references" },
+    "entries": { "$ref": "#/$defs/references" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "references": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "path"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "path": { "type": "string", "pattern": "^catalog/" }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}
+

@@ -1,0 +1,46 @@
+#!/bin/bash
+set -euo pipefail
+
+enrollment=
+role=
+confirmation=
+usage() {
+    echo "usage: $0 --enrollment /Volumes/DNS-ENROLL --role dns01 --confirm 'ERASE dns01'" >&2
+    exit 2
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --enrollment) enrollment=${2:-}; shift 2 ;;
+        --role) role=${2:-}; shift 2 ;;
+        --confirm) confirmation=${2:-}; shift 2 ;;
+        *) usage ;;
+    esac
+done
+case "$role" in dns01|dns02|dns03) ;; *) usage ;; esac
+[ -d "$enrollment" ] || usage
+[ "$confirmation" = "ERASE $role" ] || { echo "authorize-reinstall: exact confirmation required" >&2; exit 1; }
+active_file=$enrollment/records/$role/ACTIVE
+[ -s "$active_file" ] || { echo "authorize-reinstall: no completed generation for $role" >&2; exit 1; }
+generation=$(sed -n '1p' "$active_file")
+public=$enrollment/records/$role/$generation/public.json
+[ -s "$public" ] || { echo "authorize-reinstall: missing $public" >&2; exit 1; }
+uuid_raw=$(jq -er '.hardware.system_uuid' "$public")
+if command -v shasum >/dev/null 2>&1; then
+    uuid=$(printf '%s' "$uuid_raw" | tr '[:lower:]' '[:upper:]' |
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | shasum -a 256 | awk '{print $1}')
+else
+    uuid=$(printf '%s' "$uuid_raw" | tr '[:lower:]' '[:upper:]' |
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sha256sum | awk '{print $1}')
+fi
+mkdir -p "$enrollment/reinstall"
+token=$enrollment/reinstall/$role.allow
+{
+    printf 'role=%s\n' "$role"
+    printf 'system_uuid_sha256=%s\n' "$uuid"
+    printf 'previous_generation=%s\n' "$generation"
+    printf 'authorize_erase=true\n'
+} > "$token.tmp"
+mv "$token.tmp" "$token"
+sync
+echo "authorize-reinstall: one-generation authorization written to $token"

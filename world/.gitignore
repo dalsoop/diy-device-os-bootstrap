@@ -1,0 +1,30 @@
+.DS_Store
+.env
+.env.*
+
+# Machine-local inputs and observations
+local/*
+!local/README.md
+
+# Generated plans, caches, downloads, and media
+.device-os/
+**/.device-os/
+artifacts/
+cache/
+downloads/
+work/
+*.iso
+*.img
+*.raw
+*.qcow2
+*.deb
+*.tar
+*.tar.gz
+
+# Credentials and recovery material
+secrets/
+credentials/
+*.age
+*.key
+*.pem
+id_*

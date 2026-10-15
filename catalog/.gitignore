@@ -1,0 +1,8 @@
+.DS_Store
+.dryforge/
+*.iso
+*.img
+*.raw
+cache/
+work/
+

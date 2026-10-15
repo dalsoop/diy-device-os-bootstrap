@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+catalog=${1:-${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}}
+
+"$script_dir/verify-catalog" "$catalog" >/dev/null
+jq '{
+  control: [
+    {VTOY_MENU_LANGUAGE: .usb.default_language},
+    {VTOY_HELP_TXT_LANGUAGE: .usb.default_language},
+    {VTOY_DEFAULT_MENU_MODE: "1"},
+    {VTOY_TREE_VIEW_MENU_STYLE: "1"},
+    {VTOY_DEFAULT_SEARCH_ROOT: "/images"},
+    {VTOY_FILT_DOT_UNDERSCORE_FILE: "1"}
+  ],
+  menu_alias:
+    ([.groups[] | {dir: ("/" + .path), alias: .menu_alias}] +
+     [.entries[] | {image: ("/" + .destination), alias: .menu_alias}])
+}' "$catalog"

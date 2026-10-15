@@ -1,0 +1,36 @@
+.DS_Store
+.dryforge/
+.env
+.env.*
+!.env.example
+
+# Generated installer inputs and outputs
+artifacts/
+cache/
+downloads/
+work/
+*.iso
+*.img
+*.raw
+*.qcow2
+*.deb
+*.tar
+*.tar.gz
+
+# Machine-local installer inputs and Simple-CDD output
+inventory/local/
+installer/inputs/operator-authorized-keys
+installer/inputs/age-recipient
+installer/simple-cdd/generated/
+installer/simple-cdd/images/
+installer/simple-cdd/tmp/
+installer/simple-cdd/debian-cd/
+installer/simple-cdd/mirror/
+
+# Credentials and recovery material
+secrets/
+credentials/
+*.age
+*.key
+*.pem
+id_*

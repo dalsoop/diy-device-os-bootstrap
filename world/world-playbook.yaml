@@ -1,0 +1,15 @@
+apiVersion: homelab.gujo.dev/v1alpha1
+kind: WorldPlaybook
+
+metadata:
+  name: Gujo Homelab World Playbook
+
+spec:
+  timezone: Asia/Seoul
+  drafts:
+    - slug: gujo-home
+      path: drafts/gujo-home/world.yaml
+  generations:
+    root: worlds
+    idFormat: "{YYYYMMDDHHmmss}-{world-slug}"
+    publishAfter: verified-physical-usb-write

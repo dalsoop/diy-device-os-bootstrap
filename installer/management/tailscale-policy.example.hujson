@@ -1,0 +1,18 @@
+{
+  "tagOwners": {
+    "tag:dns-appliance": ["autogroup:admin"],
+  },
+
+  "grants": [
+    {
+      "src": ["autogroup:admin"],
+      "dst": ["tag:dns-appliance"],
+      "ip": ["tcp:22", "udp:53", "tcp:53", "tcp:9090", "tcp:9100", "tcp:53443"],
+    },
+    {
+      "src": ["tag:dns-appliance"],
+      "dst": ["tag:dns-appliance"],
+      "ip": ["tcp:53443"],
+    },
+  ],
+}

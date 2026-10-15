@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+
+router_cidr=${1:-10.0.0.1/16}
+python3 - "$router_cidr" <<'PY'
+import ipaddress
+import sys
+
+router = ipaddress.ip_interface(sys.argv[1])
+nodes = [ipaddress.ip_address(f"10.0.5.{n}") for n in (1, 2, 3)]
+missing = [str(node) for node in nodes if node not in router.network]
+if missing:
+    raise SystemExit(
+        f"network-preflight: {router} does not contain DNS nodes: {', '.join(missing)}"
+    )
+print(f"network-preflight: {router.network} contains router and all DNS nodes")
+PY
+
+for address in 10.0.0.1 10.0.5.1 10.0.5.2 10.0.5.3; do
+    if ping -c 1 -W 1 "$address" >/dev/null 2>&1; then
+        echo "reachable $address"
+    else
+        echo "not-reachable $address"
+    fi
+done

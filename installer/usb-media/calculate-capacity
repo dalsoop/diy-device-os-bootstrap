@@ -1,0 +1,463 @@
+#!/bin/bash
+set -euo pipefail
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+catalog=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
+cache_dir=${USB_MEDIA_CACHE_DIR:-$repo_root/cache/usb-media}
+target_label=
+target_bytes=
+device=
+offline=0
+json_output=0
+temporary=$(mktemp -d)
+runtime_map=$temporary/runtime-artifacts
+runtime_manifest_map=$temporary/runtime-manifests
+: > "$runtime_map"
+: > "$runtime_manifest_map"
+trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+
+usage() {
+    cat >&2 <<EOF
+usage: $0 [--capacity 16GB | --device /dev/sdX]
+  [--runtime-artifact id=/absolute/path]
+  [--runtime-manifest id=/absolute/path] [--offline] [--json]
+
+Without a target, reports 16GB, 32GB, and 64GB suitability.
+Remote size probes request headers or one byte; they do not download ISO images.
+EOF
+    exit 2
+}
+
+fail() {
+    echo "usb-media calculate-capacity: $*" >&2
+    exit 1
+}
+
+parse_assignment() {
+    local assignment=${1:-}
+    [[ "$assignment" == *=* ]] || usage
+    assignment_id=${assignment%%=*}
+    assignment_file=${assignment#*=}
+    [[ "$assignment_id" =~ ^[a-z0-9][a-z0-9-]*$ ]] || fail "invalid entry ID: $assignment_id"
+    [[ "$assignment_file" = /* ]] || fail "runtime artifact path must be absolute: $assignment_id"
+    [[ "$assignment_file" != *$'\t'* && "$assignment_file" != *$'\n'* ]] ||
+        fail "runtime artifact path contains unsupported whitespace: $assignment_id"
+}
+
+parse_capacity() {
+    local value=${1//[[:space:]]/}
+    local number unit multiplier
+    if [[ "$value" =~ ^([0-9]+)([A-Za-z]+)?$ ]]; then
+        number=${BASH_REMATCH[1]}
+        unit=${BASH_REMATCH[2]:-B}
+    else
+        fail "capacity must look like 16000000000, 16GB, or 16GiB"
+    fi
+    unit=$(printf '%s' "$unit" | tr '[:lower:]' '[:upper:]')
+    case "$unit" in
+        B) multiplier=1 ;;
+        KB) multiplier=1000 ;;
+        MB) multiplier=1000000 ;;
+        GB) multiplier=1000000000 ;;
+        TB) multiplier=1000000000000 ;;
+        KIB) multiplier=1024 ;;
+        MIB) multiplier=$((1024 * 1024)) ;;
+        GIB) multiplier=$((1024 * 1024 * 1024)) ;;
+        TIB) multiplier=$((1024 * 1024 * 1024 * 1024)) ;;
+        *) fail "unsupported capacity unit: $unit" ;;
+    esac
+    parsed_capacity=$((number * multiplier))
+}
+
+file_size() {
+    local source_file=$1
+    if stat -c %s "$source_file" >/dev/null 2>&1; then
+        stat -c %s "$source_file"
+    else
+        stat -f %z "$source_file"
+    fi
+}
+
+sha256_file() {
+    local source_file=$1
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$source_file" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$source_file" | awk '{print $1}'
+    else
+        fail "sha256sum or shasum is required to trust local artifact sizes"
+    fi
+}
+
+probe_remote_size() {
+    local source_url=$1
+    local header_file total http_status
+    header_file=$(mktemp "$temporary/header.XXXXXX")
+    http_status=$(curl --silent --show-error --location --head --proto '=https' --tlsv1.2 \
+        --max-time 30 --dump-header "$header_file" --output /dev/null \
+        --write-out '%{http_code}' "$source_url" 2>/dev/null || true)
+    total=
+    if [[ "$http_status" =~ ^2[0-9][0-9]$ ]]; then
+        total=$(awk '
+      {
+        line=tolower($0)
+        if (line ~ /^http\//) {
+          range_value=""
+          length_value=""
+        }
+        if (line ~ /^content-range:/) {
+          sub(/^.*\//, "", line)
+          gsub(/\r/, "", line)
+          if (line ~ /^[0-9]+$/) range_value=line
+        }
+        if (line ~ /^content-length:/) {
+          sub(/^[^:]*:[[:space:]]*/, "", line)
+          gsub(/\r/, "", line)
+          if (line ~ /^[0-9]+$/) length_value=line
+        }
+      }
+      END {
+        if (range_value != "") print range_value
+        else if (length_value != "") print length_value
+      }
+    ' "$header_file")
+    fi
+    if [ "$total" = 0 ]; then
+        total=
+    fi
+    if [ -z "$total" ]; then
+        : > "$header_file"
+        http_status=$(curl --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --range 0-0 --max-filesize 1048576 --max-time 30 \
+            --dump-header "$header_file" --output /dev/null \
+            --write-out '%{http_code}' "$source_url" 2>/dev/null || true)
+        if [[ "$http_status" =~ ^2[0-9][0-9]$ ]]; then
+            total=$(awk '
+          {
+            line=tolower($0)
+            if (line ~ /^http\//) {
+              range_value=""
+              length_value=""
+            }
+            if (line ~ /^content-range:/) {
+              sub(/^.*\//, "", line)
+              gsub(/\r/, "", line)
+              if (line ~ /^[0-9]+$/) range_value=line
+            }
+            if (line ~ /^content-length:/) {
+              sub(/^[^:]*:[[:space:]]*/, "", line)
+              gsub(/\r/, "", line)
+              if (line ~ /^[0-9]+$/ && line > 1) length_value=line
+            }
+          }
+          END {
+            if (range_value != "") print range_value
+            else if (length_value != "") print length_value
+          }
+        ' "$header_file")
+        fi
+        if [ "$total" = 0 ]; then
+            total=
+        fi
+    fi
+    rm -f "$header_file"
+    printf '%s' "$total"
+}
+
+device_size() {
+    local target_device=$1
+    case "$(uname -s)" in
+        Linux)
+            command -v blockdev >/dev/null 2>&1 || fail "blockdev is required for --device"
+            blockdev --getsize64 "$target_device"
+            ;;
+        Darwin)
+            command -v diskutil >/dev/null 2>&1 || fail "diskutil is required for --device"
+            command -v plutil >/dev/null 2>&1 || fail "plutil is required for --device"
+            diskutil info -plist "$target_device" |
+                plutil -extract TotalSize raw -o - -
+            ;;
+        *) fail "--device is supported only on Linux and macOS" ;;
+    esac
+}
+
+human_bytes() {
+    awk -v bytes="$1" 'BEGIN {
+      split("B KiB MiB GiB TiB", unit, " ")
+      value=bytes + 0
+      unit_index=1
+      while (value >= 1024 && unit_index < 5) {
+        value=value/1024
+        unit_index++
+      }
+      if (unit_index == 1) printf "%.0f %s", value, unit[unit_index]
+      else printf "%.2f %s", value, unit[unit_index]
+    }'
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --capacity)
+            [ "$#" -ge 2 ] || usage
+            [ -z "$device" ] || fail "--capacity and --device are mutually exclusive"
+            parse_capacity "$2"
+            target_bytes=$parsed_capacity
+            target_label=$2
+            shift 2
+            ;;
+        --device)
+            [ "$#" -ge 2 ] || usage
+            [ -z "$target_bytes" ] || fail "--capacity and --device are mutually exclusive"
+            device=$2
+            target_label=$2
+            shift 2
+            ;;
+        --runtime-artifact)
+            [ "$#" -ge 2 ] || usage
+            parse_assignment "$2"
+            printf '%s\t%s\n' "$assignment_id" "$assignment_file" >> "$runtime_map"
+            shift 2
+            ;;
+        --runtime-manifest)
+            [ "$#" -ge 2 ] || usage
+            parse_assignment "$2"
+            printf '%s\t%s\n' "$assignment_id" "$assignment_file" >> "$runtime_manifest_map"
+            shift 2
+            ;;
+        --offline) offline=1; shift ;;
+        --json) json_output=1; shift ;;
+        -h|--help) usage ;;
+        *) usage ;;
+    esac
+done
+
+command -v jq >/dev/null 2>&1 || fail "jq is required"
+[ -r "$catalog" ] || fail "resolved catalog is missing; run ./device-os plan"
+"$script_dir/verify-catalog" "$catalog" >/dev/null
+
+if [ -n "$device" ]; then
+    target_bytes=$(device_size "$device")
+    [[ "$target_bytes" =~ ^[0-9]+$ ]] || fail "could not read device capacity: $device"
+fi
+
+details='[]'
+unknown='[]'
+unverified='[]'
+verified_entry_bytes=0
+estimated_entry_bytes=0
+
+while IFS= read -r entry; do
+    entry_id=$(jq -er '.id' <<<"$entry")
+    source_kind=$(jq -er '.source.kind' <<<"$entry")
+    entry_bytes=
+    size_source=
+    entry_unverified=0
+    case "$source_kind" in
+        locked-download)
+            filename=$(jq -er '.source.filename' <<<"$entry")
+            expected_sha256=$(jq -er '.source.sha256' <<<"$entry")
+            cached_file=$cache_dir/$filename
+            if [ -s "$cached_file" ]; then
+                actual_sha256=$(sha256_file "$cached_file")
+                [ "$actual_sha256" = "$expected_sha256" ] ||
+                    fail "cached checksum mismatch for $entry_id; run prepare with a clean cache"
+                entry_bytes=$(file_size "$cached_file")
+                size_source=verified-cache
+            elif [ "$offline" -eq 0 ] && command -v curl >/dev/null 2>&1; then
+                source_url=$(jq -er '.source.url' <<<"$entry")
+                entry_bytes=$(probe_remote_size "$source_url")
+                if [ -n "$entry_bytes" ]; then
+                    size_source=remote-header
+                    entry_unverified=1
+                fi
+            fi
+            ;;
+        runtime-artifact)
+            runtime_file=$(awk -F '\t' -v id="$entry_id" '
+              $1 == id { value=$2 }
+              END { print value }
+            ' "$runtime_map")
+            if [ -n "$runtime_file" ] && [ -f "$runtime_file" ]; then
+                entry_bytes=$(file_size "$runtime_file")
+                runtime_manifest=$(awk -F '\t' -v id="$entry_id" '
+                  $1 == id { value=$2 }
+                  END { print value }
+                ' "$runtime_manifest_map")
+                if [ -n "$runtime_manifest" ] && [ -r "$runtime_manifest" ]; then
+                    digest_field=$(jq -er '.source.manifest_digest_field' <<<"$entry")
+                    expected_sha256=$(jq -er --arg field "$digest_field" \
+                        '.[$field] | select(type == "string" and test("^[a-f0-9]{64}$"))' \
+                        "$runtime_manifest")
+                    actual_sha256=$(sha256_file "$runtime_file")
+                    [ "$actual_sha256" = "$expected_sha256" ] ||
+                        fail "runtime artifact checksum mismatch for $entry_id"
+                    size_source=verified-runtime
+                else
+                    size_source=runtime-file-unverified
+                    entry_unverified=1
+                fi
+            fi
+            ;;
+        *) fail "unsupported entry source kind: $source_kind" ;;
+    esac
+
+    if [[ "$entry_bytes" =~ ^[0-9]+$ ]]; then
+        if [ "$entry_unverified" -eq 1 ]; then
+            estimated_entry_bytes=$((estimated_entry_bytes + entry_bytes))
+            unverified=$(jq -c --arg id "$entry_id" '. + [$id]' <<<"$unverified")
+        else
+            verified_entry_bytes=$((verified_entry_bytes + entry_bytes))
+        fi
+        details=$(jq -c \
+            --arg id "$entry_id" --arg kind "$source_kind" \
+            --arg source "$size_source" --argjson bytes "$entry_bytes" \
+            '. + [{id:$id,kind:$kind,bytes:$bytes,size_source:$source}]' <<<"$details")
+    else
+        unknown=$(jq -c --arg id "$entry_id" '. + [$id]' <<<"$unknown")
+        details=$(jq -c \
+            --arg id "$entry_id" --arg kind "$source_kind" \
+            '. + [{id:$id,kind:$kind,bytes:null,size_source:"unknown"}]' <<<"$details")
+    fi
+done < <(jq -c '.entries[]' "$catalog")
+
+reserve_mib=$(jq -er '.usb.enrollment_reserve_mib' "$catalog")
+overhead_mib=$(jq -er '.usb.capacity_overhead_mib' "$catalog")
+reserve_bytes=$((reserve_mib * 1024 * 1024))
+overhead_bytes=$((overhead_mib * 1024 * 1024))
+calculated_entry_bytes=$((verified_entry_bytes + estimated_entry_bytes))
+verified_minimum_bytes=$((verified_entry_bytes + reserve_bytes + overhead_bytes))
+estimated_minimum_bytes=$((calculated_entry_bytes + reserve_bytes + overhead_bytes))
+unknown_count=$(jq 'length' <<<"$unknown")
+unverified_count=$(jq 'length' <<<"$unverified")
+
+targets='[]'
+append_target() {
+    local label=$1
+    local bytes=$2
+    local fits_json verified_remaining estimated_remaining
+    verified_remaining=$((bytes - verified_minimum_bytes))
+    estimated_remaining=$((bytes - estimated_minimum_bytes))
+    if [ "$verified_minimum_bytes" -ge "$bytes" ]; then
+        fits_json=false
+    elif [ "$unknown_count" -gt 0 ] || [ "$unverified_count" -gt 0 ]; then
+        fits_json=null
+    else
+        fits_json=true
+    fi
+    targets=$(jq -c \
+        --arg label "$label" --argjson bytes "$bytes" \
+        --argjson fits "$fits_json" \
+        --argjson verified_remaining "$verified_remaining" \
+        --argjson estimated_remaining "$estimated_remaining" \
+        '. + [{
+          label:$label,
+          bytes:$bytes,
+          fits:$fits,
+          remaining_after_verified_bytes:$verified_remaining,
+          remaining_after_estimated_bytes:$estimated_remaining
+        }]' \
+        <<<"$targets")
+}
+
+if [ -n "$target_bytes" ]; then
+    append_target "$target_label" "$target_bytes"
+else
+    append_target 16GB 16000000000
+    append_target 32GB 32000000000
+    append_target 64GB 64000000000
+fi
+
+if [ "$unknown_count" -eq 0 ] && [ "$unverified_count" -eq 0 ]; then
+    required_json=$estimated_minimum_bytes
+else
+    required_json=null
+fi
+
+result=$(jq -n \
+    --argjson entries "$details" \
+    --argjson verified_entry_bytes "$verified_entry_bytes" \
+    --argjson estimated_entry_bytes "$estimated_entry_bytes" \
+    --argjson calculated_entry_bytes "$calculated_entry_bytes" \
+    --argjson reserve_bytes "$reserve_bytes" \
+    --argjson overhead_bytes "$overhead_bytes" \
+    --argjson verified_minimum_bytes "$verified_minimum_bytes" \
+    --argjson estimated_minimum_bytes "$estimated_minimum_bytes" \
+    --argjson unknown_entries "$unknown" \
+    --argjson unverified_entries "$unverified" \
+    --argjson required_bytes "$required_json" \
+    --argjson targets "$targets" \
+    '{
+      schema_version:1,
+      entries:$entries,
+      verified_entry_bytes:$verified_entry_bytes,
+      estimated_entry_bytes:$estimated_entry_bytes,
+      calculated_entry_bytes:$calculated_entry_bytes,
+      enrollment_reserve_bytes:$reserve_bytes,
+      capacity_overhead_bytes:$overhead_bytes,
+      verified_minimum_bytes:$verified_minimum_bytes,
+      estimated_minimum_bytes:$estimated_minimum_bytes,
+      unknown_entries:$unknown_entries,
+      unverified_entries:$unverified_entries,
+      required_bytes:$required_bytes,
+      targets:$targets
+    }')
+
+if [ "$json_output" -eq 1 ]; then
+    jq . <<<"$result"
+    exit 0
+fi
+
+echo "Gujo Homelab OS USB capacity plan"
+echo
+jq -r '.entries[] |
+  if .bytes == null then
+    "- " + .id + ": size unknown"
+  else
+    "- " + .id + ": " + (.bytes | tostring) + " bytes (" + .size_source + ")"
+  end' <<<"$result"
+echo
+echo "Verified image bytes: $(human_bytes "$verified_entry_bytes")"
+if [ "$estimated_entry_bytes" -gt 0 ]; then
+    echo "Estimated image bytes: $(human_bytes "$estimated_entry_bytes")"
+fi
+echo "Enrollment reserve: $(human_bytes "$reserve_bytes")"
+echo "Capacity overhead: $(human_bytes "$overhead_bytes")"
+echo "Verified minimum: $(human_bytes "$verified_minimum_bytes")"
+if [ "$estimated_entry_bytes" -gt 0 ]; then
+    echo "Estimated minimum: $(human_bytes "$estimated_minimum_bytes")"
+fi
+if [ "$unknown_count" -gt 0 ]; then
+    echo "Unknown entries: $(jq -r 'join(", ")' <<<"$unknown")"
+fi
+if [ "$unverified_count" -gt 0 ]; then
+    echo "Estimated entries: $(jq -r 'join(", ")' <<<"$unverified")"
+fi
+echo
+while IFS= read -r target; do
+    label=$(jq -r '.label' <<<"$target")
+    fits=$(jq -r '.fits | if . == null then "pending" else tostring end' <<<"$target")
+    verified_remaining=$(jq -r '.remaining_after_verified_bytes' <<<"$target")
+    estimated_remaining=$(jq -r '.remaining_after_estimated_bytes' <<<"$target")
+    if [ "$fits" = true ]; then
+        echo "$label: FITS, $(human_bytes "$verified_remaining") free above the configured minimum"
+    elif [ "$fits" = false ]; then
+        shortage=$((-verified_remaining))
+        echo "$label: TOO SMALL by at least $(human_bytes "$shortage")"
+    else
+        if [ "$unknown_count" -gt 0 ]; then
+            if [ "$estimated_remaining" -ge 0 ]; then
+                echo "$label: PENDING, estimated headroom is $(human_bytes "$estimated_remaining") before unknown artifacts"
+            else
+                echo "$label: PENDING, current unverified estimate exceeds the target by $(human_bytes "$((-estimated_remaining))")"
+            fi
+        else
+            if [ "$estimated_remaining" -ge 0 ]; then
+                echo "$label: ESTIMATE, calculated headroom is $(human_bytes "$estimated_remaining"); verify artifacts for a final result"
+            else
+                echo "$label: ESTIMATE, unverified sizes exceed the target by $(human_bytes "$((-estimated_remaining))"); verify artifacts for a final result"
+            fi
+        fi
+    fi
+done < <(jq -c '.targets[]' <<<"$result")
+

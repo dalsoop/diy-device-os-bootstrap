@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "truenas-scale",
+  "group": "storage",
+  "version": "25.10.7",
+  "architecture": "x86_64",
+  "destination": "images/03-storage/truenas-25.10.7.iso",
+  "menu_alias": "TrueNAS SCALE 25.10.7 대화형 설치",
+  "description_ko": "스토리지 서버용 대화형 설치기이며 대상 디스크를 직접 확인한다.",
+  "description_en": "Interactive storage-server installer; verify the destination disk manually.",
+  "boot_behavior": "interactive-installer",
+  "profile_adapter": "none",
+  "source": {
+    "kind": "locked-download",
+    "filename": "TrueNAS-SCALE-25.10.7.iso",
+    "url": "https://download.truenas.com/TrueNAS-SCALE-Goldeye/25.10.7/TrueNAS-SCALE-25.10.7.iso",
+    "sha256": "54ce9441ce66966a392e28f63604ca3c2c083d0bec4db7bb5af2f74f7a007c8e"
+  }
+}
+
