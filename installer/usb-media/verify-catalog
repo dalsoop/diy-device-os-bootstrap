@@ -38,7 +38,7 @@ jq -e '
   .schema_version == 1 and
   (.product.name | type == "string" and length > 0) and
   (.product.repository | startswith("https://github.com/")) and
-  .catalog.repository == "https://github.com/dalsoop/gujo-homelab" and
+  .catalog.repository == "https://github.com/dalsoop/gujo-homelab-os-playbook" and
   (.catalog.revision | type == "string" and test("^[a-f0-9]{40}$")) and
   (.catalog.tree | type == "string" and test("^[a-f0-9]{40}$")) and
   (.catalog.path | safe_rel) and

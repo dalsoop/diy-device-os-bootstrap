@@ -1,7 +1,7 @@
 # Gujo Homelab OS Installer
 
 This engine module assembles verified public installation media into one
-multiboot USB inside the Gujo Homelab monorepo. Users manage the monorepo as one
+multiboot USB inside the Gujo Homelab OS Playbook monorepo. Users manage it as one
 source of truth while this directory remains the execution boundary. General
 media composition is the primary product. The guarded
 offline installer for three HP DNS appliances is a bundled local reference

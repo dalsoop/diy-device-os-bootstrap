@@ -1,7 +1,7 @@
-# Gujo Homelab World Playbook
+# World Module
 
 This module is the user-owned source of homelab intent inside the Gujo Homelab
-monorepo. Installer implementation and public Catalog data remain in sibling
+OS Playbook monorepo. Installer implementation and public Catalog data remain in sibling
 modules and are not duplicated here.
 
 ## Source-of-truth boundaries
@@ -31,7 +31,7 @@ modules and are not duplicated here.
   archives, raw hardware serials, generated media, packages, or disk images.
 - Never weaken Installer target checks or treat a Playbook edit as permission to
   erase a device.
-- Do not copy public Catalog metadata or Installer behavior into this repo.
+- Do not copy public Catalog metadata or Installer behavior into this module.
 - Keep all configured paths relative and contained within their declared World.
 
 ## Change workflow

@@ -1,8 +1,8 @@
-# Gujo Homelab
+# Gujo Homelab OS Playbook
 
-[![CI](https://github.com/dalsoop/gujo-homelab/actions/workflows/ci.yml/badge.svg)](https://github.com/dalsoop/gujo-homelab/actions/workflows/ci.yml)
+[![CI](https://github.com/dalsoop/gujo-homelab-os-playbook/actions/workflows/ci.yml/badge.svg)](https://github.com/dalsoop/gujo-homelab-os-playbook/actions/workflows/ci.yml)
 
-One repository holds the complete source for a homelab World: operator intent,
+This user-owned playbook holds the complete source for a homelab World: operator intent,
 public operating-system metadata, guarded installation-media tooling, and the
 append-only record of verified physical USB generations.
 
@@ -21,8 +21,8 @@ consumers in one pull request.
 Clone one repository:
 
 ```sh
-git clone https://github.com/dalsoop/gujo-homelab.git
-cd gujo-homelab
+git clone https://github.com/dalsoop/gujo-homelab-os-playbook.git
+cd gujo-homelab-os-playbook
 ```
 
 Edit [`world/drafts/gujo-home/world.yaml`](world/drafts/gujo-home/world.yaml) to
@@ -64,7 +64,7 @@ generations are never edited or replaced.
 ## Repository map
 
 ```text
-gujo-homelab/
+gujo-homelab-os-playbook/
 ├── device-os              root operator command
 ├── world/                 user intent and immutable USB generations
 │   ├── drafts/            mutable desired state

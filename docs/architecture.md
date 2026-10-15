@@ -2,7 +2,7 @@
 
 ## One repository, three trust domains
 
-Gujo Homelab is intentionally one repository so a World change, Catalog change,
+Gujo Homelab OS Playbook is intentionally one repository so a World change, Catalog change,
 Installer consumer change, fixtures, and documentation can land atomically.
 The former repository boundaries remain explicit module and runtime trust
 boundaries.

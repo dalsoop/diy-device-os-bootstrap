@@ -2,9 +2,9 @@
 
 ## Purpose
 
-The Gujo Homelab World Playbook is the user-owned source of intent consumed by
-the Installer. The Catalog answers what operating systems are available, the
-Installer owns how media is resolved and written safely, and the World Playbook
+The World module is the user-owned source of intent inside Gujo Homelab OS
+Playbook. The Catalog answers what operating systems are available, the
+Installer owns how media is resolved and written safely, and the World module
 records what one homelab intended to place on one USB generation.
 
 A World is not a continuously edited digital twin. It is an immutable snapshot
