@@ -34,6 +34,23 @@ jq -e '
   def bundle_source:
     (.kind == "repository-file" or .kind == "repository-tree") and
     (.path | safe_rel);
+  def world_contract:
+    .schema_version == 1 and
+    (.source.playbook | safe_rel) and (.source.world | safe_rel) and
+    (.world.name | type == "string" and length > 0) and
+    (.world.slug | type == "string" and test("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")) and .world.lifecycle == "draft" and
+    (.world.timezone | type == "string" and length > 0) and
+    (.media.id | type == "string" and test("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")) and
+    (.media.language == "ko-KR" or .media.language == "en-US") and
+    (.media.entries | type == "array" and length > 0 and all(.[]; type == "string" and test("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"))) and
+    ((.media.entries | length) == (.media.entries | unique | length)) and
+    .policies.requireExactHardwareMatch == true and
+    .policies.requireSingleInternalTargetDisk == true and
+    .policies.requireTargetSpecificEraseConfirmation == true and
+    .policies.automaticBootTimeout == "disabled" and
+    (if (.media.entries | index("dns-appliance")) != null
+     then .policies.unattendedInstall == "guarded"
+     else true end);
 
   .schema_version == 1 and
   (.product.name | type == "string" and length > 0) and
@@ -83,7 +100,16 @@ jq -e '
   (([.bootloader.source.filename] + [.entries[].source | select(.kind == "locked-download") | .filename] | length) ==
    ([.bootloader.source.filename] + [.entries[].source | select(.kind == "locked-download") | .filename] | unique | length)) and
   ([.entries[] | select(.profile_adapter == "dns-appliance")] | length <= 1) and
-  (all(.entries[]; if .profile_adapter == "dns-appliance" then .source.kind == "runtime-artifact" else true end))
+  (all(.entries[]; if .profile_adapter == "dns-appliance" then .source.kind == "runtime-artifact" else true end)) and
+  (if any(.entries[]; .profile_adapter == "dns-appliance")
+   then .usb.enrollment_reserve_mib > 0
+   else .usb.enrollment_reserve_mib == 0 end) and
+  (if has("world")
+   then (.world | world_contract) and
+        ([.entries[].id] == .world.media.entries) and
+        (.usb.default_language ==
+          (if .world.media.language == "ko-KR" then "ko_KR" else "en_US" end))
+   else true end)
 ' "$catalog" >/dev/null || fail "catalog contract is invalid"
 
 echo "usb-media catalog: valid"

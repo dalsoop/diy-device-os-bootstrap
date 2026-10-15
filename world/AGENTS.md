@@ -41,6 +41,6 @@ live evidence exists. Keep source validation, image assembly, physical USB
 write, firmware boot, operating-system installation, and network cutover as
 separate evidence states.
 
-The module is currently a contract scaffold. Do not claim that the Installer
-has validated, built, or written a World until the corresponding command and
-evidence exist.
+The resolver and Installer consumption path are implemented. Do not claim that
+the Installer built or wrote a World, or published a completed generation,
+until the corresponding command and evidence exist.

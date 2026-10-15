@@ -8,9 +8,11 @@ labels, safety policy, and append-only USB generations. Public media
 metadata is contributed to the Catalog rather than copied into either the
 Installer or a Playbook.
 
-The current Installer reference composition includes Proxmox VE, Proxmox Backup
-Server, TrueNAS SCALE, Pop!_OS, Debian Live, and a local DNS-appliance installer.
-Inclusion in one USB does not grant the same automation level to every entry.
+The Installer reference collection includes Proxmox VE, Proxmox Backup Server,
+TrueNAS SCALE, Pop!_OS, and Debian Live. The user World selects from those
+public entries and reviewed Installer-local profiles such as the DNS-appliance
+installer. Inclusion in one USB does not grant the same automation level to
+every entry.
 
 ## Media rules
 
@@ -35,9 +37,10 @@ A user adds or removes public entries in the World. A private or
 organization-specific image belongs in World-local intent. The Catalog remains
 the reviewed public metadata source in this monorepo.
 
-The current `collections/` and `usb-media/local-entries/` directories remain an
-Installer-owned reference surface until the World consumer is
-implemented. They are not the final user customization boundary.
+`collections/` remains an Installer-owned reference and menu-group surface;
+`usb-media/local-entries/` registers reviewed local profiles. Neither is the
+ordinary user's selection boundary. `device-os world ...` consumes selection
+and policy from the World and rejects IDs absent from both registries.
 
 An entry that uses an implemented source kind and `profile_adapter: none` must
 flow through resolution, fetch, verification, staging, and menu generation

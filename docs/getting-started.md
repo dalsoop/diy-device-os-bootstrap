@@ -5,13 +5,12 @@ command from the monorepo root unless a section explicitly says otherwise.
 
 ## Current implementation boundary
 
-The repository contains a World model, Catalog data, and Installer tooling, but
-the three surfaces are not fully connected yet:
+The repository connects the World model, Catalog data, and Installer tooling:
 
-- `./device-os` currently selects public media through
-  `installer/collections/device-os.json`.
-- `world/drafts/<slug>/world.yaml` documents desired state but is not yet an
-  input to `device-os`.
+- `./device-os world ...` validates `world/drafts/<slug>/world.yaml` and uses
+  its selected media entries.
+- the Installer independently validates the resulting World plan, Catalog
+  entries, local profiles, and live target before destructive work.
 - A successful write does not yet publish an immutable directory under
   `world/worlds/` automatically.
 - Linux can assemble the complete multiboot USB. macOS can plan and simulate,
@@ -36,56 +35,57 @@ the Catalog, Installer, and safety-policy diff rather than merging it blindly.
 
 ## 2. Install planning prerequisites
 
-Read-only planning needs Git and jq. Capacity probes and downloads also need
-curl and a SHA-256 implementation.
+Read-only World planning needs Git, jq, and Ruby. Capacity probes and downloads
+also need curl and a SHA-256 implementation.
 
 On Debian or Ubuntu:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y git jq curl coreutils age
+sudo apt-get install -y git jq ruby curl coreutils age
 ```
 
 On macOS with Homebrew:
 
 ```sh
-brew install git jq age
+brew install git jq ruby age
 ```
 
 ## 3. Inspect and select media
 
-List the Catalog and inspect the current reference selection:
+Validate the World, list the Catalog, and inspect the World selection:
 
 ```sh
-./device-os available
-./device-os plan
-./device-os simulate
+./device-os world validate
+./device-os world available
+./device-os world plan
+./device-os world simulate
 ```
 
-`available`, `plan`, and `simulate` do not download images or write a disk.
+These commands do not download images or write a disk.
 
-Until World consumption is implemented, change the public-media selection with
-the root command:
+Change the media selection in the mutable World draft:
 
-```sh
-./device-os include truenas-scale
-./device-os exclude proxmox-ve
-git diff -- installer/collections/device-os.json
+```yaml
+spec:
+  media:
+    - id: dns-bootstrap
+      entries:
+        - dns-appliance
+        - truenas-scale
+      language: ko-KR
 ```
 
-`include` and `exclude` modify a tracked file. Review and commit that change in
-your fork. The guarded DNS appliance is an Installer-owned local profile and is
-included by the current reference composition independently of these public
-entry commands.
-
-The example World remains useful for documenting the intended router, switch,
-nodes, addresses, services, and policy:
+The full file is:
 
 ```text
 world/drafts/gujo-home/world.yaml
 ```
 
-Changing that file alone does not change the resolved media plan.
+Entry IDs may name public Catalog entries or reviewed Installer-local profiles.
+An unknown or duplicate ID is rejected. The legacy top-level `include` and
+`exclude` commands edit only the contributor reference collection; ordinary
+operators should manage their World instead.
 
 ## 4. Check USB capacity
 
@@ -93,7 +93,7 @@ An initial estimate may contact vendor HTTPS endpoints for content lengths but
 does not download the ISO files:
 
 ```sh
-./device-os capacity --capacity 16GB
+./device-os world capacity --capacity 16GB
 ```
 
 The default composition reports `PENDING` until the DNS runtime ISO and matching
@@ -101,7 +101,7 @@ build manifest are supplied. `PENDING` is not a fit decision. After the public
 images are prepared and the DNS artifact is built, request an exact result:
 
 ```sh
-./device-os capacity --capacity 16GB \
+./device-os world capacity --capacity 16GB \
   --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
   --runtime-manifest dns-appliance=/absolute/path/build-manifest.json
 ```
@@ -111,8 +111,8 @@ sizes remain pending.
 
 ## 5. Build the guarded DNS image
 
-Skip this section only if the DNS profile is not part of a future custom
-composition. The current reference composition requires this runtime artifact.
+Skip this section when `dns-appliance` is not selected by the World. The example
+World requires this runtime artifact.
 
 The build must run on an amd64 Debian 13 host. Boot each HP machine into a
 trusted Debian live environment, identify its wired interface and single
@@ -166,7 +166,7 @@ Download the selected public images and Ventoy archive, then verify every
 Catalog SHA-256:
 
 ```sh
-./device-os prepare
+./device-os world prepare
 ```
 
 The verified cache is ignored by Git. Do not commit downloaded media.
@@ -192,7 +192,7 @@ Run an exact capacity check with the built DNS artifact before writing. Then
 write the selected public media and guarded DNS image:
 
 ```sh
-sudo ./device-os write \
+sudo ./device-os world write \
   --device /dev/sdX \
   --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
   --runtime-manifest dns-appliance=/absolute/path/build-manifest.json \
@@ -249,7 +249,8 @@ pass.
 
 ## macOS boundary
 
-macOS supports `available`, `plan`, `capacity`, and `simulate`. The command
+macOS supports the `world validate`, `world available`, `world plan`,
+`world capacity`, and `world simulate` commands. The command
 below writes and verifies an already prepared exact-size MBR full-disk image:
 
 ```sh
@@ -260,7 +261,7 @@ sudo ./device-os write-image-macos \
 ```
 
 This repository does not currently provide the Linux/QEMU builder that creates
-`device-os.raw`. Use the Linux `./device-os write` workflow for complete USB
+`device-os.raw`. Use the Linux `./device-os world write` workflow for complete USB
 assembly until such a builder is implemented and verified.
 
 ## World generation boundary

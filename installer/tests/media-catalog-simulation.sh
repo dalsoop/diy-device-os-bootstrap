@@ -3,6 +3,7 @@ set -eu
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+monorepo_root=$(CDPATH='' cd -- "$repo_root/.." && pwd)
 catalog=$repo_root/work/device-os/catalog.json
 verify=$repo_root/usb-media/verify-catalog
 render=$repo_root/usb-media/render-ventoy-config
@@ -22,6 +23,14 @@ expect_rejected() {
     fi
 }
 
+expect_resolution_rejected() {
+    world_fixture=$1
+    if DEVICE_MEDIA_WORLD_PLAN=$world_fixture USB_MEDIA_CATALOG=$temporary/rejected.json \
+        "$repo_root/usb-media/resolve-catalog" >/dev/null 2>&1; then
+        fail "invalid World selection was accepted: $world_fixture"
+    fi
+}
+
 "$repo_root/usb-media/resolve-catalog" >/dev/null
 "$verify" "$catalog" >/dev/null
 "$render" "$catalog" > "$temporary/ventoy.json"
@@ -30,6 +39,36 @@ jq -e '
   ([.control[] | select(.VTOY_MENU_LANGUAGE == "ko_KR")] | length == 1) and
   (.menu_alias | length == 11)
 ' "$temporary/ventoy.json" >/dev/null || fail "rendered Ventoy contract is invalid"
+
+ruby "$monorepo_root/world/bin/resolve-world" --output "$temporary/world.json"
+DEVICE_MEDIA_WORLD_PLAN=$temporary/world.json USB_MEDIA_CATALOG=$temporary/world-catalog.json \
+    "$repo_root/usb-media/resolve-catalog" >/dev/null
+"$verify" "$temporary/world-catalog.json" >/dev/null
+jq -e '
+  [.entries[].id] == ["dns-appliance", "truenas-scale"] and
+  .world.world.slug == "gujo-home" and
+  .world.media.id == "dns-bootstrap" and
+  .usb.default_language == "ko_KR" and
+  .usb.enrollment_reserve_mib == 2048
+' "$temporary/world-catalog.json" >/dev/null ||
+    fail "World media selection did not become the resolved USB plan"
+
+jq '.media.entries = ["missing-entry"]' "$temporary/world.json" > "$temporary/unknown-world-entry.json"
+expect_resolution_rejected "$temporary/unknown-world-entry.json"
+
+jq '.media.entries = ["truenas-scale"]' "$temporary/world.json" > "$temporary/no-dns-world.json"
+DEVICE_MEDIA_WORLD_PLAN=$temporary/no-dns-world.json USB_MEDIA_CATALOG=$temporary/no-dns-catalog.json \
+    "$repo_root/usb-media/resolve-catalog" >/dev/null
+"$verify" "$temporary/no-dns-catalog.json" >/dev/null
+jq -e '
+  [.entries[].id] == ["truenas-scale"] and
+  .usb.enrollment_reserve_mib == 0
+' "$temporary/no-dns-catalog.json" >/dev/null ||
+    fail "non-DNS World selection retained DNS media or its enrollment reserve"
+
+jq '.policies.requireTargetSpecificEraseConfirmation = false' \
+    "$temporary/world.json" > "$temporary/weakened-world.json"
+expect_resolution_rejected "$temporary/weakened-world.json"
 
 jq '.entries[1].id = .entries[0].id' "$catalog" > "$temporary/duplicate-id.json"
 expect_rejected "$temporary/duplicate-id.json"

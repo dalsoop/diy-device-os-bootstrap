@@ -47,6 +47,9 @@ work. A committed desired value is not proof that the target still matches.
 
 ## Implementation status
 
-The module currently defines the contract and example intent only. The
-Installer still keeps its reference composition under `installer/` and does not
-yet resolve media selection from this World draft.
+`bin/resolve-world` validates draft structure, references, addresses, media,
+and fail-closed policies. `device-os world ...` passes the resulting versioned
+JSON to the Installer, which resolves the selected public and local entries.
+The Installer reference collection remains the menu-group definition and a
+contributor fallback. Atomic publication of a completed generation after a
+verified physical write is still pending.

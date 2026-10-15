@@ -28,21 +28,12 @@ jobs:
       - name: Check Python syntax
         run: |
           python3 -c 'compile(open("installer/management/dns-appliance-status-monitor/server.py", encoding="utf-8").read(), "server.py", "exec")'
-      - name: Validate World contract
+      - name: Check Ruby syntax
         run: |
-          ruby -ryaml -ripaddr -e '
-            root = YAML.safe_load_file("world/world-playbook.yaml", permitted_classes: [], aliases: false)
-            world = YAML.safe_load_file("world/drafts/gujo-home/world.yaml", permitted_classes: [], aliases: false)
-            abort("invalid WorldPlaybook") unless root["apiVersion"] == "homelab.gujo.dev/v1alpha1" && root["kind"] == "WorldPlaybook"
-            abort("invalid World") unless world["apiVersion"] == "homelab.gujo.dev/v1alpha1" && world["kind"] == "World"
-            spec = world.fetch("spec")
-            ids = spec.fetch("nodes").map { |node| node.fetch("id") }
-            abort("duplicate node ID") unless ids.uniq.length == ids.length
-            addresses = spec.fetch("nodes").map { |node| IPAddr.new(node.fetch("ipv4")) }
-            abort("duplicate node address") unless addresses.uniq.length == addresses.length
-            network = IPAddr.new(spec.fetch("networks").first.fetch("cidr"))
-            abort("node outside network") unless addresses.all? { |address| network.include?(address) }
-          '
+          ruby -c world/bin/resolve-world
+          ruby -c world/tests/world-contract-simulation.rb
+      - name: Validate World contract
+        run: world/tests/world-contract-simulation.rb
       - name: Validate Catalog contracts
         run: |
           catalog/bin/verify-catalog

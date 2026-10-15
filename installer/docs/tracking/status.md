@@ -6,6 +6,7 @@ check mark does not imply successful physical installation.
 | Capability | Implemented | Verified | Remaining evidence |
 | --- | --- | --- | --- |
 | Monorepo commit and Catalog tree resolution without executing Catalog code | Yes | CI simulation pending | Clean-checkout resolver coverage |
+| World validation and media selection consumption | Yes | CI simulation pending | Disposable-media qualification |
 | Append-only World generation per verified physical USB creation | Documentation only | No | External Playbook schema, pending transaction, publication, and rejection tests |
 | Data-only addition for existing locked-download entries | Yes | Isolated simulation | Broader entry compatibility set |
 | New source kinds or profile adapters without core changes | No | No | Requires an explicit plug-in design |

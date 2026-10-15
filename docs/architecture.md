@@ -9,8 +9,8 @@ boundaries.
 
 ```text
 world/ desired state
-       .
-       . planned input; not consumed yet
+       |
+       | validated selection and policy
        v
 installer/ resolver and safety engine <--- catalog/ public data only
        |
@@ -19,14 +19,15 @@ verified image -> confirmed physical USB -> immutable World generation
 ```
 
 `world/` is user-controlled declarative input. `catalog/` is untrusted data even
-though it shares a checkout. The Installer currently validates Catalog and
+though it shares a checkout. The Installer validates World, Catalog, and
 Installer-local input before use and alone owns download, assembly, or
-disk-write behavior; it will also validate World input once that edge exists.
+disk-write behavior.
 
-The final World-to-Installer edge and immutable-generation publication are not
-implemented. The current resolver reads `installer/collections/device-os.json`
-and Installer-local profiles. This transitional collection is the executable
-selection until `device-os world validate/plan/write` exists.
+The World-to-Installer selection edge is implemented through `device-os world
+validate/plan/capacity/simulate/prepare/write`. The reference collection still
+defines menu groups and a contributor fallback, while ordinary selection comes
+from `world/drafts/<slug>/world.yaml`. Immutable-generation publication after a
+verified physical write remains unimplemented.
 
 ## Identity and reproducibility
 

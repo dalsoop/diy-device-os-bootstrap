@@ -27,8 +27,22 @@ operator requests one physical USB creation. The initial World vocabulary is:
 IDs are lowercase ASCII kebab-case and unique within their kind. Every
 reference must resolve exactly once. Static addresses must be unique and belong
 to the referenced network. A gateway must be directly reachable or have an
-explicit route. These semantic checks are required before implementation can
-claim validation.
+explicit route. `bin/resolve-world` enforces these semantic checks before
+emitting a plan.
+
+## Resolved World plan
+
+The resolver emits versioned JSON containing safe source paths, World identity,
+the chosen media definition, ordered entry IDs, language, and safety policies.
+If multiple drafts or media definitions exist, selection must be explicit.
+The Installer validates this plan again and requires the resolved media entries
+to match the World order exactly.
+
+The supported presentation languages are `ko-KR` and `en-US`, mapped to the
+corresponding Ventoy language identifiers. A World containing `dns-appliance`
+must retain guarded unattended installation and all Worlds must require exact
+hardware matching, a single internal target disk, target-specific erase
+confirmation, and a disabled automatic boot timeout.
 
 ## USB generation identity
 
