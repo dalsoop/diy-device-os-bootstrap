@@ -1,5 +1,7 @@
 # Operations
 
+Run every command in this document from the monorepo root.
+
 ## Supported environments
 
 Catalog planning needs Git and jq. Image download additionally needs curl and a
@@ -9,7 +11,8 @@ amd64 Debian 13 with Simple-CDD and the packages named by the build command.
 
 macOS may inspect, select, simulate, query device capacity, and write a prepared
 size-matched MBR full-disk image with `diskutil`, `plutil`, `dd`, and `cmp`.
-Linux device-capacity queries use `blockdev`. Full USB assembly and the DNS ISO
+This repository does not yet provide the builder for that raw image. Linux
+device-capacity queries use `blockdev`; complete USB assembly and the DNS ISO
 build remain Linux-only.
 
 ## Safe planning workflow
@@ -61,8 +64,8 @@ installation for the current pilot role only.
 ```sh
 sudo apt-get install simple-cdd debian-cd debian-archive-keyring \
   reprepro rsync xorriso isolinux syslinux-common skopeo jq curl
-installer/fetch-locked-sources
-installer/build-image
+installer/installer/fetch-locked-sources
+installer/installer/build-image
 ```
 
 The build must run on amd64 Debian 13. Retain the ISO, build manifest, package
@@ -102,14 +105,14 @@ all checks pass.
 When all three records are complete:
 
 ```sh
-management/import-enrollment \
+installer/management/import-enrollment \
   --enrollment /Volumes/DNS-ENROLL \
   --identity /secure/dns-recovery-age-key.txt \
   --output /secure/dns-bootstrap
 
 DNS_CLUSTER_CREDENTIALS_DIR=/secure/dns-bootstrap \
 DNS_CLUSTER_ACCESS_OUTPUT=/secure/cluster-access.json.age \
-  management/cluster-bootstrap
+  installer/management/cluster-bootstrap
 ```
 
 Move imported material into the long-lived secret store and rotate bootstrap
@@ -123,7 +126,7 @@ management command with protected OAuth credential files:
 ```sh
 TAILSCALE_OAUTH_CLIENT_ID_FILE=/secure/tailscale/client-id \
 TAILSCALE_OAUTH_CLIENT_SECRET_FILE=/secure/tailscale/client-secret \
-  management/tailscale-enroll --all
+  installer/management/tailscale-enroll --all
 ```
 
 Enrollment is complete only after hostname, tag, address, peer reachability, and
@@ -131,7 +134,7 @@ the absence of DNS, route, exit-node, and SSH authority are verified.
 
 ## DNS changes and rollback
 
-Use `management/dnsctl health`, then create and review a machine-readable
+Use `installer/management/dnsctl health`, then create and review a machine-readable
 plan. Apply with a caller-supplied commit equal to current `HEAD`, a clean zone
 file, and explicit confirmation. Because the command does not consume the saved
 plan or prove pull-request approval, the operator must compare the reviewed
@@ -144,14 +147,14 @@ lease cycle. On failure, restore previous DHCP DNS values first.
 
 ## Backup, restore, and reinstall
 
-Collect only encrypted backups with `management/collect-backups`. Periodically
+Collect only encrypted backups with `installer/management/collect-backups`. Periodically
 prove one backup by decrypting and restoring it in an isolated environment.
 
 A production restore requires an explicit target URL and
 `RESTORE <exact-url>`. Verify canaries before touching another node.
 
 A completed node can be reinstalled only after
-`management/authorize-reinstall` writes a token for its active generation.
+`installer/management/authorize-reinstall` writes a token for its active generation.
 That authorization expires logically when a replacement generation becomes
 active.
 

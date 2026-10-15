@@ -25,11 +25,16 @@ git clone https://github.com/dalsoop/gujo-homelab-os-playbook.git
 cd gujo-homelab-os-playbook
 ```
 
-Edit [`world/drafts/gujo-home/world.yaml`](world/drafts/gujo-home/world.yaml) to
-describe the intended devices, network, services, and selected media. Local
-hardware observations belong under the ignored `world/local/` directory;
-passwords, tokens, private keys, generated images, and raw hardware identifiers
-never belong in Git.
+Follow the [Getting Started guide](docs/getting-started.md) for the implemented
+fork, selection, capacity, DNS build, Linux USB write, verification, and
+enrollment workflow.
+
+The example [`world/drafts/gujo-home/world.yaml`](world/drafts/gujo-home/world.yaml)
+describes intended devices, networks, services, and media. It is not yet
+consumed by `device-os`; the current command uses the reference selection in
+`installer/collections/device-os.json`. Local hardware observations belong in
+ignored directories, and passwords, tokens, private keys, generated images,
+and raw hardware identifiers never belong in Git.
 
 Use the root command for read-only media operations:
 
@@ -40,7 +45,8 @@ Use the root command for read-only media operations:
 ./device-os simulate
 ```
 
-`simulate` does not download images or write a disk. Destructive USB commands
+`simulate` does not download images or write a disk. A capacity check may make
+small HTTPS size probes unless `--offline` is supplied. Destructive USB commands
 retain live target checks and require an exact device-specific confirmation.
 
 ## One World, accumulating USB generations
@@ -49,14 +55,16 @@ One World covers the connected environment: router, switch, computers,
 networks, logical nodes, services, and selected media. DNS, Proxmox, TrueNAS,
 and workstations are members of the World rather than separate Worlds.
 
-Each successful physical USB creation publishes a distinct immutable directory:
+The intended contract publishes each successfully verified physical USB as a
+distinct immutable directory:
 
 ```text
 world/worlds/{YYYYMMDDHHmmss}-{world-slug}/
 ```
 
 The timestamp is captured in `Asia/Seoul` when the resolved World is sealed
-immediately before a target-specific write. A generation is published only
+immediately before a target-specific write. The automatic publication
+transaction is not implemented yet. A future generation may be published only
 after the physical write and required readback verification succeed. Rewriting
 the same intent to another USB creates another generation; completed
 generations are never edited or replaced.
@@ -96,6 +104,7 @@ Only the DNS profile has guarded unattended behavior.
 
 ## Documentation
 
+- [Getting started](docs/getting-started.md)
 - [Monorepo architecture](docs/architecture.md)
 - [Security boundaries](docs/security.md)
 - [Migration decision](docs/tracking/decisions/0001-consolidate-into-one-monorepo.md)
@@ -103,4 +112,3 @@ Only the DNS profile has guarded unattended behavior.
 - [Installer operations](installer/docs/operations.md)
 - [Physical verification gates](installer/docs/verification.md)
 - [Catalog contracts](catalog/docs/contracts.md)
-One repository for homelab World intent, OS catalog metadata, and guarded installation media tooling.

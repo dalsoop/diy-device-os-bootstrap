@@ -1,6 +1,7 @@
 # Agent management plane
 
 The management plane is separate from the DNS appliances.
+Run command examples from the monorepo root.
 
 Implemented bootstrap and operating surfaces:
 
@@ -39,7 +40,7 @@ Store the ID and secret outside this repository, one line per protected file:
 ```sh
 TAILSCALE_OAUTH_CLIENT_ID_FILE=/secure/tailscale/client-id \
 TAILSCALE_OAUTH_CLIENT_SECRET_FILE=/secure/tailscale/client-secret \
-  management/tailscale-enroll --all
+  installer/management/tailscale-enroll --all
 ```
 
 The nodes must already be reachable at `10.0.5.1` through `10.0.5.3` by the
