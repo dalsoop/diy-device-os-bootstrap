@@ -2,7 +2,7 @@
   "schema_version": 1,
   "installer": {
     "repository": "https://github.com/dalsoop/gujo-homelab-os-installer.git",
-    "revision": "dd1878c4f0bfc257e3af02c984ccff6eef56a495"
+    "revision": "600ea2ab764f127595c2779485d8bed92688e222"
   },
   "catalog": {
     "repository": "https://github.com/dalsoop/gujo-homelab-os-catalog.git",
