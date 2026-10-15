@@ -7,8 +7,9 @@ x86_64 installation or live media. It does not select a user's collection,
 resolve private profiles, download artifacts, build images, render a boot menu,
 or write a disk.
 
-Installer forks consume the Catalog as untrusted, pinned data. This keeps reusable
-vendor metadata separate from local policy and destructive behavior.
+The Installer consumes the Catalog as untrusted, pinned data. User-owned World
+Playbooks select entries without moving local policy or destructive behavior
+into this repository.
 
 ## Components
 
@@ -43,7 +44,8 @@ profile adapter, and source.
 The current public source strategy is `locked-download`: a basename-only
 filename, official HTTPS URL, and lowercase SHA-256. Public entries use
 `profile_adapter: none` and are either interactive installers or live
-environments. Guarded unattended profiles remain local to a Installer fork.
+environments. Guarded unattended intent belongs in a World Playbook and its
+implemented behavior remains in the Installer.
 
 Bootloaders have their own contract because archive root and implementation are
 different from ISO menu metadata.
@@ -51,7 +53,8 @@ different from ISO menu metadata.
 ## Dependency direction
 
 Vendor release information flows into Catalog data. Catalog data flows by exact
-Git commit into Installer resolution. No Installer configuration flows back into
+Git commit into Installer resolution. World Playbook selection also flows into
+Installer resolution. No Installer or Playbook configuration flows back into
 the Catalog, and no Catalog file can supply executable code.
 
 Schemas describe the intended public shape, while `bin/verify-catalog` is the

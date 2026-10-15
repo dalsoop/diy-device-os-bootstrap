@@ -1,7 +1,7 @@
 # Gujo Homelab OS Catalog
 
 This repository is the public, data-only source of bootloader and operating
-system metadata consumed by Gujo Homelab OS Installer forks. It publishes
+system metadata consumed by the Gujo Homelab OS Installer. It publishes
 versioned JSON contracts, official HTTPS locations, checksums, menu text, and
 boot behavior. It never downloads, executes, or writes the media it describes.
 
@@ -53,7 +53,8 @@ gujo-homelab-os-catalog/
 - Keep one item per JSON file, register every controlled file exactly once, and
   preserve stable IDs across release updates.
 - Public entries remain interactive installers or live environments with
-  `profile_adapter: none`; private and guarded profiles belong in Installer forks.
+  `profile_adapter: none`; private selection and guarded profiles belong in
+  user-owned World Playbooks, while their behavior belongs in the Installer.
 - Do not add download execution, hooks, collection policy, USB layout, or
   disk-write behavior to this data-only repository.
 
