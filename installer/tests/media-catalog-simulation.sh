@@ -45,13 +45,28 @@ DEVICE_MEDIA_WORLD_PLAN=$temporary/world.json USB_MEDIA_CATALOG=$temporary/world
     "$repo_root/usb-media/resolve-catalog" >/dev/null
 "$verify" "$temporary/world-catalog.json" >/dev/null
 jq -e '
-  [.entries[].id] == ["dns-appliance", "truenas-scale"] and
+  [.entries[].id] == ["dns-appliance", "truenas-scale", "debian-live"] and
   .world.world.slug == "gujo-home" and
   .world.media.id == "dns-bootstrap" and
   .usb.default_language == "ko_KR" and
   .usb.enrollment_reserve_mib == 2048
 ' "$temporary/world-catalog.json" >/dev/null ||
     fail "World media selection did not become the resolved USB plan"
+
+ruby "$monorepo_root/world/bin/resolve-world" --media inventory-capture \
+    --output "$temporary/inventory-world.json"
+DEVICE_MEDIA_WORLD_PLAN=$temporary/inventory-world.json \
+USB_MEDIA_CATALOG=$temporary/inventory-catalog.json \
+    "$repo_root/usb-media/resolve-catalog" >/dev/null
+"$verify" "$temporary/inventory-catalog.json" >/dev/null
+jq -e '
+  [.entries[].id] == ["debian-live", "truenas-scale"] and
+  .world.media.id == "inventory-capture" and
+  .usb.enrollment_reserve_mib == 0 and
+  ([.bundles[].id] | index("dns-inventory-capture")) != null and
+  ([.bundles[].id] | index("dns-inventory-guide")) != null
+' "$temporary/inventory-catalog.json" >/dev/null ||
+    fail "inventory media did not resolve as a non-destructive USB plan"
 
 jq '.media.entries = ["missing-entry"]' "$temporary/world.json" > "$temporary/unknown-world-entry.json"
 expect_resolution_rejected "$temporary/unknown-world-entry.json"

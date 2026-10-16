@@ -198,8 +198,12 @@ begin
   media_ids = unique_ids(media_items, "media")
   requested_media = options[:media]
   if requested_media.nil?
-    fail_contract("select media with --media because multiple definitions exist") unless media_items.length == 1
-    requested_media = media_ids.first
+    if media_items.length == 1
+      requested_media = media_ids.first
+    else
+      requested_media = safe_id(spec["defaultMedia"], "World.spec.defaultMedia")
+      fail_contract("World.spec.defaultMedia is not declared by media") unless media_ids.include?(requested_media)
+    end
   else
     safe_id(requested_media, "--media")
   end

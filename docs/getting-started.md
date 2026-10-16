@@ -125,6 +125,33 @@ sizes remain pending.
 Skip this section when `dns-appliance` is not selected by the World. The example
 World requires this runtime artifact.
 
+### First pass: capture the three HP inventories
+
+The guarded image cannot be built safely before the target machines are known.
+Prepare the non-destructive inventory selection first:
+
+```sh
+DEVICE_OS_MEDIA=inventory-capture ./device-os world plan
+DEVICE_OS_MEDIA=inventory-capture ./device-os world prepare
+```
+
+Burn that selection on Linux using the normal exact removable-device gate. It
+contains Debian Live, TrueNAS SCALE, the inventory capture command, and its
+guide, but deliberately contains no DNS installer:
+
+```sh
+sudo DEVICE_OS_MEDIA=inventory-capture ./device-os world burn \
+  --device /dev/sdX \
+  --confirm 'ERASE /dev/sdX USB_SERIAL'
+```
+
+Boot each HP into Debian Live and follow `guides/DNS_INVENTORY.md` on the USB.
+Copy the resulting `inventory-dns01.conf` through `inventory-dns03.conf` files
+into the ignored `installer/inventory/local/` directory on the management host.
+This first pass never authorizes internal-disk erasure.
+
+### Second pass: build the production image
+
 The build must run on an amd64 Debian 13 host. Boot each HP machine into a
 trusted Debian live environment, identify its wired interface and single
 internal target disk, and capture one ignored inventory file at a time:
@@ -170,6 +197,11 @@ installer/installer/build-image
 The ISO is created under `installer/installer/simple-cdd/images/`; its matching
 manifest is `installer/artifacts/build-manifest.json`. Both remain ignored by
 Git. A successful build is not permission to erase a USB or internal disk.
+
+The default `dns-bootstrap` selection contains the guarded DNS image, TrueNAS
+SCALE, and Debian Live for recovery. Re-run exact capacity and burn the USB a
+second time with the production DNS ISO and matching manifest. A legacy or
+test-only DNS image is never a substitute.
 
 ## 6. Prepare public images on Linux
 
