@@ -21,6 +21,8 @@ policy.
 - Accept only paths to role-specific token files. Never accept token values as
   tool arguments or environment values.
 - Forward an explicit environment allowlist to child processes.
+- Accept a management-host Tailscale executable override only as an absolute,
+  executable path fixed by the host administrator; never as a tool argument.
 - Keep DNS reader, planner, and applier credentials separate.
 - Require a readable trusted Technitium CA file before exposing an apply call;
   insecure bootstrap TLS is limited to read and plan compatibility.

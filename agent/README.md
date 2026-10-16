@@ -43,6 +43,15 @@ export DEVICE_OS_AGENT_DNS02_URL=https://dns02:53443
 export DEVICE_OS_AGENT_DNS03_URL=https://dns03:53443
 ```
 
+When the Tailscale CLI is not installed on `PATH`, set its fixed absolute
+executable path on the management host. This is useful for the macOS GUI app,
+whose bundle executable must be invoked by its real path rather than through a
+renamed symbolic link:
+
+```sh
+export DEVICE_OS_AGENT_TAILSCALE_COMMAND=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+```
+
 Omit the applier token unless agent writes are intentionally enabled. Agent
 apply rejects an absent or unreadable trusted CA file; it never permits
 `dnsctl`'s bootstrap-only insecure TLS mode for writes. Apply is also disabled
@@ -103,8 +112,9 @@ Then configure the remote MCP host to launch:
 }
 ```
 
-The SSH account environment must set the fixed Python and credential-file
-paths. Do not accept those values from the remote client with `AcceptEnv`.
+The SSH account environment must set the fixed Python, optional Tailscale
+executable, and credential-file paths. Do not accept those values from the
+remote client with `AcceptEnv`.
 Use the Tailscale ACL and host firewall to reject non-tailnet SSH traffic.
 
 This is ordinary OpenSSH transported over Tailscale. Tailscale SSH, Serve,
