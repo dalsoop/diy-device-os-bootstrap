@@ -15,12 +15,13 @@ Run the static check from the management machine:
 installer/management/network-preflight 10.0.0.1/16
 ```
 
-The default run also checks outbound IP connectivity, DNS resolution, and HTTPS
-to a fixed public endpoint. This distinguishes a valid local address plan from
-working Internet access. Use `--json` for automation or `--offline` only when
-the check must avoid external traffic. Internet is required while preparing
-public images and enrolling Tailscale, but not while booting the already-built
-offline DNS installer. DNS service health remains a separate cutover gate.
+The default run records the management host's default gateway and also checks
+outbound IP connectivity, DNS resolution, and HTTPS to a fixed public endpoint.
+This distinguishes a valid local address plan from working Internet access.
+Use `--json` for automation or `--offline` only when the check must avoid
+external traffic. Internet is required while preparing public images and
+enrolling Tailscale, but not while booting the already-built offline DNS
+installer. DNS service health remains a separate cutover gate.
 
 ## Cabling
 

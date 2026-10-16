@@ -50,12 +50,13 @@ estimated totals, fixed reserve, overhead, unknown and unverified entry IDs,
 and target results.
 
 `management/network-preflight` validates the fixed DNS addresses against the
-router interface and reports live router and node reachability. By default it
-also performs fixed outbound TCP, DNS-resolution, and HTTPS probes. `--offline`
-records Internet readiness as unknown rather than successful. `--json` emits
-schema version 1 with separate topology, Internet, network-only phase gates,
-and blocker fields. These results do not replace DNS health, artifact, USB,
-installer, or router-cutover evidence.
+router interface, records the management host's observed default route, and
+reports live router and node reachability. By default it also performs fixed
+outbound TCP, DNS-resolution, and HTTPS probes. `--offline` records Internet
+readiness as unknown rather than successful. `--json` emits schema version 1
+with separate topology, Internet, network-only phase gates, and blocker fields.
+These results do not replace DNS health, artifact, USB, installer, or
+router-cutover evidence.
 
 ## Composition contract
 

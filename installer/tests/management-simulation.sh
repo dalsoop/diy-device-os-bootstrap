@@ -106,6 +106,7 @@ jq -e '
   .schema_version == 1 and
   .operation == "network.preflight" and
   .topology.valid == true and
+  (.topology.management_host_default_route.observed | type == "boolean") and
   .internet.checked == false and
   .internet.ready == null and
   .network_gates.offline_dns_install.ready == true and

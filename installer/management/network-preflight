@@ -47,6 +47,7 @@ done
 python3 - "$router_cidr" "$output" "$check_internet" <<'PY'
 import ipaddress
 import json
+from pathlib import Path
 import platform
 import shutil
 import socket
@@ -93,6 +94,71 @@ def ping(address: str) -> bool:
         return result.returncode == 0
     except subprocess.TimeoutExpired:
         return False
+
+
+def default_route() -> dict[str, object]:
+    if platform.system() == "Darwin":
+        route = next(
+            (
+                str(path)
+                for path in (
+                    Path("/sbin/route"),
+                    Path("/usr/sbin/route"),
+                )
+                if path.is_file()
+            ),
+            None,
+        )
+        command = [route, "-n", "get", "default"] if route else None
+    else:
+        ip = next(
+            (
+                str(path)
+                for path in (
+                    Path("/usr/sbin/ip"),
+                    Path("/sbin/ip"),
+                )
+                if path.is_file()
+            ),
+            shutil.which("ip"),
+        )
+        command = [ip, "route", "show", "default"] if ip else None
+    if not command:
+        return {"observed": False, "gateway": None, "interface": None}
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except subprocess.TimeoutExpired:
+        return {"observed": False, "gateway": None, "interface": None}
+    if result.returncode != 0:
+        return {"observed": False, "gateway": None, "interface": None}
+    gateway = None
+    interface = None
+    if platform.system() == "Darwin":
+        for line in result.stdout.splitlines():
+            key, separator, value = line.strip().partition(":")
+            if not separator:
+                continue
+            if key == "gateway":
+                gateway = value.strip()
+            elif key == "interface":
+                interface = value.strip()
+    else:
+        fields = result.stdout.split()
+        if "via" in fields and fields.index("via") + 1 < len(fields):
+            gateway = fields[fields.index("via") + 1]
+        if "dev" in fields and fields.index("dev") + 1 < len(fields):
+            interface = fields[fields.index("dev") + 1]
+    return {
+        "observed": bool(gateway or interface),
+        "gateway": gateway,
+        "interface": interface,
+    }
 
 
 def tcp_probe(address: str, port: int) -> bool:
@@ -142,6 +208,10 @@ def https_probe(url: str) -> bool:
 
 
 router_reachable = ping(str(router.ip))
+route = default_route()
+route["matches_planned_router"] = (
+    route["gateway"] == str(router.ip) if route["gateway"] else None
+)
 node_results = {
     role: {
         "address": str(address),
@@ -177,6 +247,8 @@ internet_ready = internet["ready"]
 blockers = []
 if not router_reachable:
     blockers.append("router-unreachable")
+if route["matches_planned_router"] is False:
+    blockers.append("default-gateway-differs-from-planned-router")
 for role, item in node_results.items():
     if not item["reachable"]:
         blockers.append(f"{role}-unreachable")
@@ -191,6 +263,7 @@ report = {
         "router_interface": str(router),
         "network": str(router.network),
         "router_reachable": router_reachable,
+        "management_host_default_route": route,
         "dns_nodes": node_results,
     },
     "internet": internet,
@@ -222,6 +295,15 @@ if output == "json":
     print(json.dumps(report, sort_keys=True))
 else:
     print(f"network-preflight: {router.network} contains router and all DNS nodes")
+    if route["observed"]:
+        print(
+            "default-route "
+            f"gateway={route['gateway'] or 'unknown'} "
+            f"interface={route['interface'] or 'unknown'} "
+            f"matches-planned-router={'yes' if route['matches_planned_router'] else 'no'}"
+        )
+    else:
+        print("default-route not-observed")
     print(f"{'reachable' if router_reachable else 'not-reachable'} {router.ip} router")
     for role, item in node_results.items():
         state = "reachable" if item["reachable"] else "not-reachable"
