@@ -20,7 +20,10 @@ Implemented bootstrap and operating surfaces:
 - `authorize-reinstall` creates a one-generation erase authorization after an
   explicit role confirmation.
 - `network-preflight` verifies that the configured router prefix contains all
-  three DNS addresses and reports current reachability.
+  three DNS addresses, reports router and node reachability, and separately
+  checks fixed outbound IP, DNS-resolution, and HTTPS probes. `--json` provides
+  the versioned agent contract; `--offline` makes the skipped Internet check
+  explicit rather than treating it as success.
 - `tailscale-enroll` uses a management-host OAuth credential to mint a distinct
   one-off key for each selected node, sends the key over existing LAN SSH,
   deletes the remote temporary key file, attempts best-effort API revocation,

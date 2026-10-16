@@ -1,25 +1,236 @@
 #!/bin/bash
 set -euo pipefail
 
-router_cidr=${1:-10.0.0.1/16}
-python3 - "$router_cidr" <<'PY'
+output=text
+check_internet=true
+router_cidr=10.0.0.1/16
+router_cidr_set=false
+
+usage() {
+    cat <<'EOF'
+Usage: network-preflight [--json] [--offline] [ROUTER_CIDR]
+
+Checks the fixed homelab address plan, current LAN reachability, and—unless
+--offline is supplied—outbound IP, DNS, and HTTPS connectivity. It never
+changes routes, DNS, the router, or any appliance.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --json)
+            output=json
+            ;;
+        --offline)
+            check_internet=false
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --*)
+            echo "network-preflight: unknown option: $1" >&2
+            exit 2
+            ;;
+        *)
+            if [ "$router_cidr_set" = true ]; then
+                echo "network-preflight: provide only one router CIDR" >&2
+                exit 2
+            fi
+            router_cidr=$1
+            router_cidr_set=true
+            ;;
+    esac
+    shift
+done
+
+python3 - "$router_cidr" "$output" "$check_internet" <<'PY'
 import ipaddress
+import json
+import platform
+import shutil
+import socket
+import subprocess
 import sys
 
-router = ipaddress.ip_interface(sys.argv[1])
-nodes = [ipaddress.ip_address(f"10.0.5.{n}") for n in (1, 2, 3)]
-missing = [str(node) for node in nodes if node not in router.network]
+
+router_text, output, check_internet_text = sys.argv[1:]
+check_internet = check_internet_text == "true"
+roles = ("dns01", "dns02", "dns03")
+
+try:
+    router = ipaddress.ip_interface(router_text)
+except ValueError as error:
+    raise SystemExit(f"network-preflight: invalid router CIDR: {error}")
+
+if router.version != 4:
+    raise SystemExit("network-preflight: only IPv4 is supported")
+
+nodes = {
+    role: ipaddress.ip_address(f"10.0.5.{index}")
+    for index, role in enumerate(roles, start=1)
+}
+missing = [str(address) for address in nodes.values() if address not in router.network]
 if missing:
     raise SystemExit(
         f"network-preflight: {router} does not contain DNS nodes: {', '.join(missing)}"
     )
-print(f"network-preflight: {router.network} contains router and all DNS nodes")
-PY
 
-for address in 10.0.0.1 10.0.5.1 10.0.5.2 10.0.5.3; do
-    if ping -c 1 -W 1 "$address" >/dev/null 2>&1; then
-        echo "reachable $address"
-    else
-        echo "not-reachable $address"
-    fi
-done
+
+def ping(address: str) -> bool:
+    command = shutil.which("ping")
+    if not command:
+        return False
+    timeout = "1000" if platform.system() == "Darwin" else "1"
+    try:
+        result = subprocess.run(
+            [command, "-c", "1", "-W", timeout, address],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+        )
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def tcp_probe(address: str, port: int) -> bool:
+    try:
+        with socket.create_connection((address, port), timeout=3):
+            return True
+    except OSError:
+        return False
+
+
+def dns_probe(hostname: str) -> bool:
+    try:
+        return bool(socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM))
+    except OSError:
+        return False
+
+
+def https_probe(url: str) -> bool:
+    curl = shutil.which("curl")
+    if not curl:
+        return False
+    try:
+        result = subprocess.run(
+            [
+                curl,
+                "--silent",
+                "--show-error",
+                "--fail",
+                "--location",
+                "--head",
+                "--connect-timeout",
+                "3",
+                "--max-time",
+                "8",
+                "--output",
+                "/dev/null",
+                url,
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
+
+
+router_reachable = ping(str(router.ip))
+node_results = {
+    role: {
+        "address": str(address),
+        "contained": True,
+        "reachable": ping(str(address)),
+    }
+    for role, address in nodes.items()
+}
+
+internet = {
+    "checked": check_internet,
+    "ip_egress": None,
+    "dns_resolution": None,
+    "https": None,
+    "ready": None,
+    "fixed_probes": {
+        "ip": "1.1.1.1:443",
+        "dns": "github.com",
+        "https": "https://github.com/",
+    },
+}
+if check_internet:
+    internet["ip_egress"] = tcp_probe("1.1.1.1", 443)
+    internet["dns_resolution"] = dns_probe("github.com")
+    internet["https"] = https_probe("https://github.com/")
+    internet["ready"] = all(
+        internet[name] for name in ("ip_egress", "dns_resolution", "https")
+    )
+
+all_nodes_reachable = all(item["reachable"] for item in node_results.values())
+lan_ready = router_reachable and all_nodes_reachable
+internet_ready = internet["ready"]
+blockers = []
+if not router_reachable:
+    blockers.append("router-unreachable")
+for role, item in node_results.items():
+    if not item["reachable"]:
+        blockers.append(f"{role}-unreachable")
+if check_internet and not internet_ready:
+    blockers.append("internet-unavailable-or-incomplete")
+
+report = {
+    "schema_version": 1,
+    "operation": "network.preflight",
+    "topology": {
+        "valid": True,
+        "router_interface": str(router),
+        "network": str(router.network),
+        "router_reachable": router_reachable,
+        "dns_nodes": node_results,
+    },
+    "internet": internet,
+    "network_gates": {
+        "media_download": {
+            "internet_required": True,
+            "ready": internet_ready,
+        },
+        "offline_dns_install": {
+            "internet_required": False,
+            "ready": True,
+        },
+        "post_install_tailscale": {
+            "internet_required": True,
+            "ready": internet_ready and all_nodes_reachable
+            if internet_ready is not None
+            else None,
+        },
+        "dns_cutover": {
+            "internet_required": False,
+            "ready": lan_ready,
+            "additional_gate": "DNS service health must pass separately",
+        },
+    },
+    "blockers": blockers,
+}
+
+if output == "json":
+    print(json.dumps(report, sort_keys=True))
+else:
+    print(f"network-preflight: {router.network} contains router and all DNS nodes")
+    print(f"{'reachable' if router_reachable else 'not-reachable'} {router.ip} router")
+    for role, item in node_results.items():
+        state = "reachable" if item["reachable"] else "not-reachable"
+        print(f"{state} {item['address']} {role}")
+    if not check_internet:
+        print("internet not-checked (--offline)")
+    else:
+        for name in ("ip_egress", "dns_resolution", "https"):
+            state = "ready" if internet[name] else "not-ready"
+            print(f"internet {name.replace('_', '-')} {state}")
+        print(f"internet ready {'yes' if internet_ready else 'no'}")
+PY

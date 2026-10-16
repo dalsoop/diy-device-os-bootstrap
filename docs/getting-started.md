@@ -64,6 +64,17 @@ Validate the World, list the Catalog, and inspect the World selection:
 
 These commands do not download images or write a disk.
 
+Check the management host's live network path separately:
+
+```sh
+installer/management/network-preflight --json 10.0.0.1/16 | jq
+```
+
+The report distinguishes LAN topology and reachability from outbound IP, DNS,
+and HTTPS connectivity. Internet is needed to prepare public images and enroll
+Tailscale; it is not needed to boot the already-built offline DNS installer.
+An Internet pass does not imply that any DNS node is installed or healthy.
+
 Change the media selection in the mutable World draft:
 
 ```yaml
@@ -255,7 +266,9 @@ dedicated SSH forced command. The SSH service must be reachable only through
 the reviewed Tailscale policy and host firewall.
 
 The gateway's default tools are read-only validation, planning, capacity,
-network, tunnel, and DNS inspection. DNS apply is disabled by default and still
+network, tunnel, and DNS inspection. `network_preflight` checks Internet
+connectivity by default; set `check_internet` to `false` for an explicitly
+offline report. DNS apply is disabled by default and still
 delegates to `dnsctl` when explicitly enabled. USB burn, OS installation,
 restore, reinstall authorization, enrollment, arbitrary commands, arbitrary
 paths, and arbitrary URLs are never MCP tools.
