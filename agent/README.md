@@ -52,6 +52,10 @@ renamed symbolic link:
 export DEVICE_OS_AGENT_TAILSCALE_COMMAND=/Applications/Tailscale.app/Contents/MacOS/Tailscale
 ```
 
+The gateway supplies the minimal `SHLVL` compatibility value required by that
+bundle executable while continuing to withhold the rest of the parent
+environment from child commands.
+
 Omit the applier token unless agent writes are intentionally enabled. Agent
 apply rejects an absent or unreadable trusted CA file; it never permits
 `dnsctl`'s bootstrap-only insecure TLS mode for writes. Apply is also disabled

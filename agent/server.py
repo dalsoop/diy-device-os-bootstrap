@@ -187,6 +187,7 @@ class Gateway:
 
     def tunnel_status(self) -> dict[str, object]:
         configured_command = os.environ.get("DEVICE_OS_AGENT_TAILSCALE_COMMAND")
+        tailscale_environment: dict[str, str] | None = None
         if configured_command:
             command_path = Path(configured_command)
             if not command_path.is_absolute() or not os.access(command_path, os.X_OK):
@@ -194,11 +195,17 @@ class Gateway:
                     "tunnel.status: configured Tailscale command is unavailable"
                 )
             tailscale = str(command_path)
+            tailscale_environment = {"SHLVL": os.environ.get("SHLVL", "1")}
         else:
             tailscale = shutil.which("tailscale", path=self._environment()["PATH"])
         if not tailscale:
             raise ToolError("tunnel.status: tailscale CLI is unavailable")
-        result = self._run("tunnel.status", [tailscale, "status", "--json"], timeout=20)
+        result = self._run(
+            "tunnel.status",
+            [tailscale, "status", "--json"],
+            timeout=20,
+            extra_environment=tailscale_environment,
+        )
         raw = result["data"]
         if not isinstance(raw, dict):
             raise ToolError("tunnel.status: Tailscale returned invalid JSON")

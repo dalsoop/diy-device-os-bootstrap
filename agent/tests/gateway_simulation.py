@@ -101,6 +101,7 @@ def main() -> None:
             root / "bin" / "tailscale",
             "#!/bin/sh\n"
             "set -eu\n"
+            "[ -n \"${SHLVL:-}\" ]\n"
             "printf '%s\\n' '{\"BackendState\":\"Running\",\"Self\":{\"HostName\":\"management\"},\"Peer\":{\"a\":{\"HostName\":\"dns01\",\"Online\":true,\"TailscaleIPs\":[\"100.64.0.1\"]},\"b\":{\"HostName\":\"unrelated\",\"Online\":true,\"TailscaleIPs\":[\"100.64.0.9\"]}}}'\n",
         )
 
