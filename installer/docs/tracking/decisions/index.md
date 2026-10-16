@@ -9,6 +9,7 @@
 | 0005 | Accepted | Verify macOS raw images before exposing their MBR |
 | 0006 | Accepted | Use verified USB creation as the World generation axis |
 | 0007 | Superseded | Make the World Playbook the only user-created repository |
+| 0008 | Accepted | Resolve physical installer media before preparing a DNS target |
 
 These decisions are retained as history. Root decision
 [`0001`](../../../../docs/tracking/decisions/0001-consolidate-into-one-monorepo.md)

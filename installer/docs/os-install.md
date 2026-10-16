@@ -16,10 +16,17 @@ requires all of the following:
 
 1. Product name, product SKU, system serial, system UUID, and one NIC MAC hash
    match exactly one of `dns01`, `dns02`, or `dns03`.
-2. Exactly one non-removable disk matches the expected model hash, serial hash,
-   and minimum byte size.
-3. The matched disk is not the device that supplied `/cdrom`.
-4. `destructive_install_enabled=true` is present in that node's local inventory.
+2. Exactly one non-removable, non-USB disk matches the expected model hash,
+   serial hash, and minimum byte size.
+3. The matched disk is not the physical parent of the device that supplied
+   `/cdrom`, including a Ventoy device-mapper path.
+4. The target and its partitions are not mounted.
+5. `destructive_install_enabled=true` is present in that node's local inventory.
+
+Only after all five checks pass does the gate clear the first and last 64 MiB
+of the target, refresh the kernel partition table, and hand that exact device
+to Debian Installer. This removes stale GPT, RAID, and EFI signatures without
+making a standalone unrestricted disk-wipe command available on the media.
 
 The image stores SHA-256 hashes of hardware identifiers, not their raw values.
 The role, address, and network settings are not secret.

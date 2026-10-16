@@ -1,5 +1,26 @@
 # Findings
 
+## The first DNS pilot selected and damaged its installer USB
+
+On 2026-10-16, read-only inspection of the removed 30.8 GB SanDisk installer
+USB showed the DNS target layout: a 1 GB EFI partition, a Linux partition, and
+swap. The EFI partition could not be mounted, and `diskutil verifyVolume`
+reported a zero FAT sector size. This is physical evidence that the installer
+USB became writable as an installation target; CP850 fallback messages were not
+the root failure.
+
+The source defect was that `/dev/mapper/Ventoy` was not resolved through its
+sysfs slave and partition ancestry. The prior simulation used the mapper name
+without modeling that ancestry and therefore could not detect the defect. The
+gate now resolves the physical parent, rejects unresolved mapper ancestry and
+all USB-backed candidates, rejects mounted targets, and clears stale disk-edge
+signatures only after every target check passes.
+
+The affected USB is not recoverable as installation media without a complete
+rebuild. Source simulation cannot close this finding: a newly built ISO and USB
+must pass VM BIOS/UEFI tests and a disposable physical `dns01` pilot before the
+installer is considered safe for the remaining nodes.
+
 ## Physical qualification is incomplete
 
 The repository has simulations and source contracts, but no recorded end-to-end

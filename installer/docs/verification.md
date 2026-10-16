@@ -7,8 +7,9 @@ evidence.
 
 ## Automated source gates
 
-- `tests/install-gate-simulation.sh` passes all 13 cases, including Ventoy's
-  `/dev/mapper/Ventoy` media path.
+- `tests/install-gate-simulation.sh` passes all 17 cases, including direct
+  partition media, Ventoy's `/dev/mapper/Ventoy` ancestry, unresolved mappers,
+  fixed-bit USB targets, mounted targets, and zero writes on every rejection.
 - `tests/management-simulation.sh` passes all 6 cases, including explicit
   offline Internet state in the JSON preflight contract.
 - `tests/tailscale-enrollment-simulation.sh` passes without printing either
@@ -43,6 +44,8 @@ evidence.
 - Reboot with the USB attached does not start another installation.
 - Boot the DNS ISO from Ventoy and prove its mapper device and physical USB
   cannot become the selected internal target.
+- After a successful install, inspect the removed USB and prove that its Ventoy
+  partition map and checksums are unchanged.
 
 ## Physical dns01 pilot
 
