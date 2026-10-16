@@ -21,7 +21,8 @@ operator requests one physical USB creation. The initial World vocabulary is:
 - `networks`: layer-three address and gateway intent;
 - `nodes`: logical identities bound to physical assets;
 - `services`: capabilities assigned to logical nodes;
-- `media`: selected install entries and presentation defaults;
+- `defaultMedia`: the declared media ID selected when no override is supplied;
+- `media`: one or more selected-entry sets and presentation defaults;
 - `policies`: fail-closed installation and write requirements.
 
 IDs are lowercase ASCII kebab-case and unique within their kind. Every
@@ -34,9 +35,10 @@ emitting a plan.
 
 The resolver emits versioned JSON containing safe source paths, World identity,
 the chosen media definition, ordered entry IDs, language, and safety policies.
-If multiple drafts or media definitions exist, selection must be explicit.
-The Installer validates this plan again and requires the resolved media entries
-to match the World order exactly.
+If multiple drafts exist, World selection must be explicit. When multiple media
+definitions exist, `defaultMedia` must name one of them; a caller may select a
+different declared media ID explicitly. The Installer validates this plan again
+and requires the resolved media entries to match the World order exactly.
 
 The supported presentation languages are `ko-KR` and `en-US`, mapped to the
 corresponding Ventoy language identifiers. A World containing `dns-appliance`

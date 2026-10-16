@@ -51,6 +51,9 @@ Capacity examples:
   ./device-os world capacity --capacity 16GB \
     --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
     --runtime-manifest dns-appliance=/absolute/path/build-manifest.json
+
+Select a non-default World media definition with DEVICE_OS_MEDIA, for example:
+  DEVICE_OS_MEDIA=inventory-capture ./device-os world plan
 EOF
 }
 

@@ -15,8 +15,13 @@ Validate and inspect the selected media from the repository root:
 ./device-os world simulate
 ```
 
-When multiple drafts or media definitions exist, select them with
-`DEVICE_OS_WORLD=<slug>` and `DEVICE_OS_MEDIA=<id>`.
+When multiple drafts exist, select one with `DEVICE_OS_WORLD=<slug>`. A World
+with multiple media definitions declares `defaultMedia`; override it with
+`DEVICE_OS_MEDIA=<id>`. The Gujo Home inventory pass is:
+
+```sh
+DEVICE_OS_MEDIA=inventory-capture ./device-os world plan
+```
 
 ## Accumulating physical USB generations
 

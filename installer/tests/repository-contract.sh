@@ -54,6 +54,7 @@ for required in \
     usb-media/local-entries/dns-appliance.json \
     collections/device-os.json \
     usb-media/guides/pop-os-ko.md \
+    usb-media/guides/dns-inventory.md \
     docs/tracking/decisions/0002-pinned-declarative-catalog.md \
     management/dns-appliance-status-monitor/config.json \
     management/dns-appliance-status-monitor/server.py \

@@ -60,9 +60,24 @@ rechecks cached files. A failed or partial download is not promoted.
 
 ## Build the DNS runtime artifact
 
-Create ignored local inventory for each intended machine, copy only an operator
-public key and age recipient into the named input paths, and enable destructive
-installation for the current pilot role only.
+The default World has two media definitions. `dns-bootstrap` is the default
+production selection. `inventory-capture` is a non-destructive first pass with
+Debian Live, TrueNAS SCALE, the inventory command, and no DNS installer:
+
+```sh
+DEVICE_OS_MEDIA=inventory-capture ./device-os world plan
+DEVICE_OS_MEDIA=inventory-capture ./device-os world prepare
+sudo DEVICE_OS_MEDIA=inventory-capture ./device-os world burn \
+  --device /dev/sdX \
+  --confirm 'ERASE /dev/sdX USB_SERIAL'
+```
+
+Boot every target HP from that USB and follow `guides/DNS_INVENTORY.md`. Import
+the resulting files into the ignored `installer/inventory/local/` directory.
+The capture output leaves `destructive_install_enabled=false`.
+
+Then copy only an operator public key and age recipient into the named input
+paths, and enable destructive installation for the current pilot role only.
 
 ```sh
 sudo apt-get install simple-cdd debian-cd debian-archive-keyring \
@@ -74,6 +89,11 @@ installer/installer/build-image
 The build must run on amd64 Debian 13. Retain the ISO, build manifest, package
 closure, checksums, and SBOM outside Git. A successful build is not permission
 to write media.
+
+After the build, return to the default `dns-bootstrap` selection, calculate
+capacity with the exact runtime artifact and manifest, and rewrite the USB. The
+final selection also retains Debian Live for recovery. Never promote the
+inventory-stage USB or a legacy test image as a production DNS installer.
 
 ## Burn a DIY Device OS USB
 

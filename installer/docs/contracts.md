@@ -87,6 +87,12 @@ the resolved entries exactly. Entry IDs and destinations are unique. Every
 entry destination belongs to its declared group. Public and local registries
 may not expose the same ID.
 
+A World with multiple media definitions declares `spec.defaultMedia`. The
+default must name one declared media ID. `DEVICE_OS_MEDIA` or resolver
+`--media` may select another declared definition. The Gujo Home World uses a
+non-destructive `inventory-capture` first pass and a default `dns-bootstrap`
+production pass; only the latter contains the DNS runtime artifact.
+
 The DNS enrollment reserve must be positive when a DNS adapter is present and
 zero when it is absent. World language `ko-KR` maps to Ventoy `ko_KR`; `en-US`
 maps to `en_US`.
