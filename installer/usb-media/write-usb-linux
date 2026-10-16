@@ -1,8 +1,11 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
 set -euo pipefail
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+monorepo_root=$(CDPATH='' cd -- "$repo_root/.." && pwd)
 catalog=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
 cache_dir=${USB_MEDIA_CACHE_DIR:-$repo_root/cache/usb-media}
 device=
@@ -74,11 +77,25 @@ fi
 
 [ "$(uname -s)" = Linux ] || fail "Linux is required"
 [ "$(id -u)" -eq 0 ] || fail "run as root"
-for command in lsblk findmnt jq sha256sum python3 sfdisk blockdev udevadm mkfs.exfat; do
+for command in lsblk findmnt jq sha256sum python3 sfdisk blockdev udevadm mkfs.exfat git; do
     command -v "$command" >/dev/null 2>&1 || fail "$command is required"
 done
 [ -r "$catalog" ] || fail "resolved catalog is missing; run ./device-os plan"
 "$script_dir/verify-catalog" "$catalog" >/dev/null
+repository_url=$(jq -er '.product.repository | select(startswith("https://"))' "$catalog")
+repository_revision=$(jq -er \
+    '.catalog.revision | select(test("^[0-9a-f]{40}$"))' "$catalog")
+checkout_revision=$(git -C "$monorepo_root" rev-parse --verify HEAD)
+[ "$repository_revision" = "$checkout_revision" ] ||
+    fail "resolved catalog revision does not match the checkout; rerun ./device-os plan"
+git -C "$monorepo_root" diff --quiet -- ||
+    fail "tracked source changes are not committed"
+git -C "$monorepo_root" diff --cached --quiet -- ||
+    fail "staged source changes are not committed"
+for legal_file in LICENSE LICENSE_HISTORY.md THIRD_PARTY_NOTICES.md \
+    third_party/licenses/Tailscale-BSD-3-Clause.txt; do
+    [ -r "$monorepo_root/$legal_file" ] || fail "missing legal file: $legal_file"
+done
 
 [ -b "$device" ] || usage
 [ "$(lsblk -dnro TYPE "$device")" = disk ] || fail "whole-disk target required"
@@ -221,7 +238,28 @@ fi
 
 mkdir -p "$mount_dir" "$enroll_dir"
 mount "$main_partition" "$mount_dir"
-install -d -m 0755 "$mount_dir/manifests" "$mount_dir/ventoy"
+install -d -m 0755 "$mount_dir/manifests" "$mount_dir/ventoy" \
+    "$mount_dir/licenses"
+install -m 0644 "$monorepo_root/LICENSE" \
+    "$mount_dir/licenses/DIY-DEVICE-OS-BOOTSTRAP-GPL-3.0.txt"
+install -m 0644 "$monorepo_root/LICENSE_HISTORY.md" \
+    "$mount_dir/licenses/LICENSE_HISTORY.md"
+install -m 0644 "$monorepo_root/THIRD_PARTY_NOTICES.md" \
+    "$mount_dir/licenses/THIRD_PARTY_NOTICES.md"
+install -m 0644 "$monorepo_root/third_party/licenses/Tailscale-BSD-3-Clause.txt" \
+    "$mount_dir/licenses/Tailscale-BSD-3-Clause.txt"
+{
+    echo "# Corresponding Source"
+    echo
+    echo "Project: DIY Device OS Bootstrap"
+    echo "License: GPL-3.0-only"
+    echo "Source revision: $repository_revision"
+    echo "Repository: $repository_url"
+    echo "Source archive: $repository_url/archive/$repository_revision.tar.gz"
+    echo
+    echo "Third-party images and binaries retain their upstream terms."
+    echo "See THIRD_PARTY_NOTICES.md and the notices inside each artifact."
+} > "$mount_dir/licenses/SOURCE.md"
 
 while IFS= read -r entry; do
     id=$(jq -er '.id' <<<"$entry")
@@ -257,6 +295,7 @@ install -m 0644 "$catalog" "$mount_dir/manifests/media-catalog.json"
     cd "$mount_dir"
     find images -type f -name '*.iso' -exec sha256sum {} + | LC_ALL=C sort > manifests/SHA256SUMS
     sha256sum manifests/media-catalog.json > manifests/MEDIA-CATALOG.SHA256
+    find licenses -type f -exec sha256sum {} + | LC_ALL=C sort > manifests/LICENSES.SHA256
 )
 "$script_dir/render-ventoy-config" "$catalog" > "$mount_dir/ventoy/ventoy.json"
 python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' \
@@ -271,6 +310,7 @@ python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' \
     if [ -n "$dns_manifest" ]; then
         echo "DNS 등록 결과는 DNS-ENROLL 파티션에만 기록된다."
     fi
+    echo "라이선스, 제3자 고지와 소스 위치는 licenses/에 있다."
     echo "Ventoy 언어는 L 키로 바꾼다."
 } > "$mount_dir/README_KO.txt"
 {
@@ -282,6 +322,7 @@ python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' \
     if [ -n "$dns_manifest" ]; then
         echo "DNS enrollment output is written only to DNS-ENROLL."
     fi
+    echo "Licenses, third-party notices, and source locations are under licenses/."
     echo "Press L to change Ventoy language."
 } > "$mount_dir/README_EN.txt"
 sync -f "$mount_dir"

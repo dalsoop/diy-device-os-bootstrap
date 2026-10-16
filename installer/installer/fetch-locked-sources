@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
 set -eu
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -10,6 +12,7 @@ cache_dir=${DNS_APPLIANCE_CACHE_DIR:-$repo_root/cache}
 archive=$cache_dir/technitium-dns-$TECHNITIUM_VERSION-amd64.oci.tar
 image_ref=$TECHNITIUM_IMAGE@$TECHNITIUM_AMD64_DIGEST
 tailscale_archive=$cache_dir/tailscale-$TAILSCALE_VERSION-amd64.tgz
+tailscale_licenses=$cache_dir/tailscale-$TAILSCALE_VERSION-dependency-licenses.md
 
 fail() {
     echo "fetch-locked-sources: $*" >&2
@@ -52,4 +55,18 @@ if [ ! -s "$tailscale_archive" ]; then
 fi
 
 printf '%s  %s\n' "$TAILSCALE_AMD64_SHA256" "$tailscale_archive" |
+    sha256sum -c -
+
+if [ ! -s "$tailscale_licenses" ]; then
+    licenses_partial=$tailscale_licenses.partial
+    trap 'rm -f "$licenses_partial"' EXIT HUP INT TERM
+    curl --fail --location --proto '=https' --tlsv1.2 \
+        --output "$licenses_partial" "$TAILSCALE_LICENSES_URL"
+    printf '%s  %s\n' "$TAILSCALE_LICENSES_SHA256" "$licenses_partial" |
+        sha256sum -c -
+    mv "$licenses_partial" "$tailscale_licenses"
+    trap - EXIT HUP INT TERM
+fi
+
+printf '%s  %s\n' "$TAILSCALE_LICENSES_SHA256" "$tailscale_licenses" |
     sha256sum -c -

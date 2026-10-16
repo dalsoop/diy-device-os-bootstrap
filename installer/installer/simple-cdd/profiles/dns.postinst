@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
 set -eu
 
 state=/run/dns-appliance/install.env
@@ -52,6 +54,19 @@ install -m 0644 /cdrom/simple-cdd/technitium.oci.tar \
     /target/usr/lib/dns-appliance/technitium.oci.tar
 install -m 0644 /cdrom/simple-cdd/enrollment-record.schema.json \
     /target/usr/share/dns-appliance/enrollment-record.schema.json
+install -d -m 0755 /target/usr/share/doc/diy-device-os-bootstrap
+install -m 0644 /cdrom/simple-cdd/diy-device-os-bootstrap-license.txt \
+    /target/usr/share/doc/diy-device-os-bootstrap/LICENSE
+install -m 0644 /cdrom/simple-cdd/license-history.md \
+    /target/usr/share/doc/diy-device-os-bootstrap/LICENSE_HISTORY.md
+install -m 0644 /cdrom/simple-cdd/third-party-notices.md \
+    /target/usr/share/doc/diy-device-os-bootstrap/THIRD_PARTY_NOTICES.md
+install -m 0644 /cdrom/simple-cdd/tailscale-license.txt \
+    /target/usr/share/doc/diy-device-os-bootstrap/Tailscale-BSD-3-Clause.txt
+install -m 0644 /cdrom/simple-cdd/tailscale-dependency-licenses.md \
+    /target/usr/share/doc/diy-device-os-bootstrap/Tailscale-Dependencies.md
+install -m 0644 /cdrom/simple-cdd/source.md \
+    /target/usr/share/doc/diy-device-os-bootstrap/SOURCE.md
 
 # Tailscale is installed from a checksum-pinned upstream static archive so the
 # appliance can be built and installed without package-repository access.

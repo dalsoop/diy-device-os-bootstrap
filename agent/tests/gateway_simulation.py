@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
 """Isolated contract simulation for the management-host MCP gateway."""
 
 from __future__ import annotations

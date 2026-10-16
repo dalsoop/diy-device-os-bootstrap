@@ -7,6 +7,12 @@ generated/technitium.oci.tar
 generated/tailscale.tgz
 generated/sources.env
 generated/enrollment-record.schema.json
+generated/diy-device-os-bootstrap-license.txt
+generated/license-history.md
+generated/third-party-notices.md
+generated/tailscale-license.txt
+generated/tailscale-dependency-licenses.md
+generated/source.md
 ../scripts/install-gate
 ../payload/nftables.conf
 ../payload/sshd-hardening.conf

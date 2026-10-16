@@ -1,4 +1,6 @@
 #!/usr/bin/env ruby
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
 # frozen_string_literal: true
 
 require "fileutils"

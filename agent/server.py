@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
 """Constrained MCP gateway for DIY Device OS Bootstrap."""
 
 from __future__ import annotations

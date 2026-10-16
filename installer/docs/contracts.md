@@ -134,15 +134,26 @@ They are not accepted from the external Catalog.
 The data partition label is `DEVICE-INST` by default. The 11-character label is
 portable across Ventoy's bundled exFAT formatter and macOS. It contains staged
 images, bundles, Ventoy configuration, the resolved Catalog, its SHA-256, image
-checksums, and human readme files. When the DNS adapter is present, a separate
-`DNS-ENROLL` partition stores installer metadata, generations, and reinstall
-authorizations.
+checksums, human readme files, and a `licenses/` bundle. That bundle records the
+project license, license history, third-party notice inventory, exact source
+revision and archive URL, and its own `manifests/LICENSES.SHA256`. When the DNS
+adapter is present, a separate `DNS-ENROLL` partition stores installer
+metadata, generations, and reinstall authorizations.
 
 The exact USB layout is an output contract. Configured source and destination
 strings under `images/`, `manifests/`, `ventoy/`, `guides/`, and
-`tools/` must pass relative-path validation. The current bundle staging code
+`tools/` must pass relative-path validation. The writer-owned `licenses/`
+directory is not configurable by the Catalog. The current bundle staging code
 follows repository symlinks and does not prove their resolved targets remain in
 the checkout; tracked bundles therefore must not contain symlinks.
+
+The DNS build manifest records the exact source commit, repository, and source
+archive. The installer carries the same source notice, project notices, the
+Tailscale BSD-3-Clause text, and the dependency-license report pinned to the
+Tailscale binary version. The installed appliance preserves them under
+`/usr/share/doc/diy-device-os-bootstrap/`. SPDX SBOM fields use `NOASSERTION`
+when the build cannot establish a single license conclusion for a package or
+container; that value is a review requirement, not a grant of permission.
 
 ## Enrollment record
 
