@@ -43,6 +43,12 @@ or any media, installation, restore, reinstall, or enrollment operation.
 ## Change workflow
 
 - Protect `main` and land substantive work through pull requests.
+- Agents may create a branch, push it, open a pull request, and monitor required
+  checks, but they must stop after reporting the green pull request. An agent
+  must not merge, enable auto-merge, bypass protection, or use an administrator
+  override unless the repository owner gives an explicit merge instruction
+  after that pull request exists and its check state is known. Earlier general
+  requests such as "proceed", "finish", or "build it" are not merge approval.
 - Read the nearest module `AGENTS.md` and its referenced standards before
   changing that module.
 - Change shared contracts together with every producer, consumer, fixture, and
