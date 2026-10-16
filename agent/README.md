@@ -8,7 +8,8 @@ SSH carried by the Tailscale network.
 ## What the agent can do
 
 - inspect the repository revision and dirty state;
-- validate, plan, simulate, and calculate capacity for the selected World;
+- validate, plan, simulate, and calculate capacity for the default production
+  media or the non-destructive `inventory-capture` selection;
 - check the configured LAN prefix, node reachability, and fixed outbound IP,
   DNS-resolution, and HTTPS probes;
 - report the Tailscale state of only `dns01`, `dns02`, and `dns03`;
@@ -18,6 +19,10 @@ SSH carried by the Tailscale network.
 It cannot burn a USB, install an operating system, authorize a reinstall,
 restore a node, mint enrollment credentials, execute arbitrary commands, read
 arbitrary paths, or call arbitrary URLs.
+
+The World tools accept an optional `media` value of `inventory-capture` or
+`dns-bootstrap`. This lets an agent inspect both passes while keeping download,
+USB burn, and internal-disk installation outside the gateway.
 
 ## Install on the management host
 

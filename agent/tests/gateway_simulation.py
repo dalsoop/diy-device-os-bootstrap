@@ -80,8 +80,8 @@ def main() -> None:
             root / "device-os",
             "#!/bin/sh\n"
             "set -eu\n"
-            "printf '{\"command\":\"%s %s\",\"offline\":\"%s\"}\\n' "
-            '"${2:-}" "${3:-}" "${6:-}"\n',
+            "printf '{\"command\":\"%s %s\",\"offline\":\"%s\",\"media\":\"%s\"}\\n' "
+            '"${2:-}" "${3:-}" "${6:-}" "${DEVICE_OS_MEDIA:-}"\n',
         )
         executable(
             root / "installer" / "management" / "network-preflight",
@@ -115,8 +115,18 @@ def main() -> None:
         server.gateway = server.Gateway(root)
         result = server.gateway.world_validate()
         assert result["ok"] is True
+        inventory_plan = server.gateway.world_plan("inventory-capture")
+        assert inventory_plan["data"]["media"] == "inventory-capture"
+        expect_tool_error(
+            lambda: server.gateway.world_plan("unknown-media"),
+            "media must be",
+        )
         capacity = server.gateway.world_capacity("16GB")
         assert capacity["data"]["offline"] == "--offline"
+        inventory_capacity = server.gateway.world_capacity(
+            "16GB", media="inventory-capture"
+        )
+        assert inventory_capacity["data"]["media"] == "inventory-capture"
         expect_tool_error(
             lambda: server.gateway.world_capacity("/dev/disk0"),
             "capacity must look like",

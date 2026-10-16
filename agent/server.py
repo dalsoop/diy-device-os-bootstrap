@@ -20,6 +20,8 @@ from mcp.types import ToolAnnotations
 
 Role = Literal["dns01", "dns02", "dns03"]
 ROLES: tuple[Role, ...] = ("dns01", "dns02", "dns03")
+Media = Literal["dns-bootstrap", "inventory-capture"]
+MEDIA: tuple[Media, ...] = ("dns-bootstrap", "inventory-capture")
 CAPACITY_PATTERN = re.compile(r"^[1-9][0-9]*(?:\.[0-9]+)?(?:GB|GiB|TB|TiB)$")
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 MAX_OUTPUT_BYTES = 64 * 1024
@@ -116,11 +118,28 @@ class Gateway:
             "diagnostics": stderr.strip() or None,
         }
 
-    def _world(self, operation: str) -> dict[str, object]:
+    @staticmethod
+    def _validate_media(media: str | None) -> Media | None:
+        if media is None:
+            return None
+        if media not in MEDIA:
+            raise ToolError(
+                "world.media: media must be dns-bootstrap or inventory-capture"
+            )
+        return media  # type: ignore[return-value]
+
+    def _world(
+        self, operation: str, media: str | None = None
+    ) -> dict[str, object]:
+        selected_media = self._validate_media(media)
+        environment = (
+            {"DEVICE_OS_MEDIA": selected_media} if selected_media else None
+        )
         return self._run(
             f"world.{operation}",
             [str(self.device_os), "world", operation],
             timeout=120,
+            extra_environment=environment,
         )
 
     def repository_status(self) -> dict[str, object]:
@@ -146,18 +165,22 @@ class Gateway:
             "diagnostics": None,
         }
 
-    def world_validate(self) -> dict[str, object]:
-        return self._world("validate")
+    def world_validate(self, media: str | None = None) -> dict[str, object]:
+        return self._world("validate", media)
 
-    def world_plan(self) -> dict[str, object]:
-        return self._world("plan")
+    def world_plan(self, media: str | None = None) -> dict[str, object]:
+        return self._world("plan", media)
 
-    def world_simulate(self) -> dict[str, object]:
-        return self._world("simulate")
+    def world_simulate(self, media: str | None = None) -> dict[str, object]:
+        return self._world("simulate", media)
 
     def world_capacity(
-        self, capacity: str, allow_network_probe: bool = False
+        self,
+        capacity: str,
+        allow_network_probe: bool = False,
+        media: str | None = None,
     ) -> dict[str, object]:
+        selected_media = self._validate_media(media)
         if not CAPACITY_PATTERN.fullmatch(capacity):
             raise ToolError("world.capacity: capacity must look like 16GB or 16GiB")
         arguments = [
@@ -170,7 +193,15 @@ class Gateway:
         ]
         if not allow_network_probe:
             arguments.append("--offline")
-        return self._run("world.capacity", arguments, timeout=120)
+        environment = (
+            {"DEVICE_OS_MEDIA": selected_media} if selected_media else None
+        )
+        return self._run(
+            "world.capacity",
+            arguments,
+            timeout=120,
+            extra_environment=environment,
+        )
 
     def network_preflight(
         self, router_cidr: str, check_internet: bool = True
@@ -375,29 +406,31 @@ def repository_status() -> dict[str, object]:
 
 
 @mcp.tool(annotations=READ_ONLY_LOCAL, structured_output=True)
-def world_validate() -> dict[str, object]:
-    """Validate the selected World without downloads or device writes."""
-    return gateway.world_validate()
+def world_validate(media: Media | None = None) -> dict[str, object]:
+    """Validate the default or named World media without downloads or writes."""
+    return gateway.world_validate(media)
 
 
 @mcp.tool(annotations=READ_ONLY_LOCAL, structured_output=True)
-def world_plan() -> dict[str, object]:
-    """Resolve and display the selected World media plan."""
-    return gateway.world_plan()
+def world_plan(media: Media | None = None) -> dict[str, object]:
+    """Resolve the default, inventory-capture, or dns-bootstrap media plan."""
+    return gateway.world_plan(media)
 
 
 @mcp.tool(annotations=READ_ONLY_LOCAL, structured_output=True)
-def world_simulate() -> dict[str, object]:
-    """Simulate the World workflow without downloads or device writes."""
-    return gateway.world_simulate()
+def world_simulate(media: Media | None = None) -> dict[str, object]:
+    """Simulate the named media workflow without downloads or device writes."""
+    return gateway.world_simulate(media)
 
 
 @mcp.tool(annotations=READ_ONLY_NETWORK, structured_output=True)
 def world_capacity(
-    capacity: str = "16GB", allow_network_probe: bool = False
+    capacity: str = "16GB",
+    allow_network_probe: bool = False,
+    media: Media | None = None,
 ) -> dict[str, object]:
-    """Calculate USB fit; network size probes are disabled by default."""
-    return gateway.world_capacity(capacity, allow_network_probe)
+    """Calculate named-media USB fit; network probes are disabled by default."""
+    return gateway.world_capacity(capacity, allow_network_probe, media)
 
 
 @mcp.tool(annotations=READ_ONLY_NETWORK, structured_output=True)
