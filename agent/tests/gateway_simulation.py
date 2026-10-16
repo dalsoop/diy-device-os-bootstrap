@@ -97,6 +97,12 @@ def main() -> None:
             "print('{\"status\":\"ok\"}')\n"
             "PY\n",
         )
+        executable(
+            root / "bin" / "tailscale",
+            "#!/bin/sh\n"
+            "set -eu\n"
+            "printf '%s\\n' '{\"BackendState\":\"Running\",\"Self\":{\"HostName\":\"management\"},\"Peer\":{\"a\":{\"HostName\":\"dns01\",\"Online\":true,\"TailscaleIPs\":[\"100.64.0.1\"]},\"b\":{\"HostName\":\"unrelated\",\"Online\":true,\"TailscaleIPs\":[\"100.64.0.9\"]}}}'\n",
+        )
 
         server.gateway = server.Gateway(root)
         result = server.gateway.world_validate()
@@ -111,6 +117,16 @@ def main() -> None:
             lambda: server.gateway.network_preflight("not-a-network"),
             "router_cidr is invalid",
         )
+        os.environ["DEVICE_OS_AGENT_TAILSCALE_COMMAND"] = "relative/tailscale"
+        expect_tool_error(
+            server.gateway.tunnel_status,
+            "configured Tailscale command is unavailable",
+        )
+        os.environ["DEVICE_OS_AGENT_TAILSCALE_COMMAND"] = str(
+            root / "bin" / "tailscale"
+        )
+        tunnel = server.gateway.tunnel_status()
+        assert set(tunnel["data"]["dns_nodes"]) == {"dns01"}
 
         commit = "a" * 40
         os.environ["DEVICE_OS_AGENT_DNS_APPLIER_TOKEN_FILE"] = str(token)
