@@ -172,18 +172,23 @@ class Gateway:
             arguments.append("--offline")
         return self._run("world.capacity", arguments, timeout=120)
 
-    def network_preflight(self, router_cidr: str) -> dict[str, object]:
+    def network_preflight(
+        self, router_cidr: str, check_internet: bool = True
+    ) -> dict[str, object]:
         try:
             interface = ipaddress.ip_interface(router_cidr)
         except ValueError as error:
             raise ToolError("network.preflight: router_cidr is invalid") from error
         if interface.version != 4:
             raise ToolError("network.preflight: only IPv4 is supported")
-        return self._run(
-            "network.preflight",
-            [str(self.management / "network-preflight"), str(interface)],
-            timeout=20,
-        )
+        arguments = [
+            str(self.management / "network-preflight"),
+            "--json",
+            str(interface),
+        ]
+        if not check_internet:
+            arguments.insert(2, "--offline")
+        return self._run("network.preflight", arguments, timeout=30)
 
     def tunnel_status(self) -> dict[str, object]:
         configured_command = os.environ.get("DEVICE_OS_AGENT_TAILSCALE_COMMAND")
@@ -396,9 +401,11 @@ def world_capacity(
 
 
 @mcp.tool(annotations=READ_ONLY_NETWORK, structured_output=True)
-def network_preflight(router_cidr: str = "10.0.0.1/16") -> dict[str, object]:
-    """Check that the router prefix contains and can reach the three DNS nodes."""
-    return gateway.network_preflight(router_cidr)
+def network_preflight(
+    router_cidr: str = "10.0.0.1/16", check_internet: bool = True
+) -> dict[str, object]:
+    """Check topology, LAN reachability, and fixed Internet connectivity probes."""
+    return gateway.network_preflight(router_cidr, check_internet)
 
 
 @mcp.tool(annotations=READ_ONLY_NETWORK, structured_output=True)

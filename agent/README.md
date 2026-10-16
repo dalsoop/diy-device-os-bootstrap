@@ -9,7 +9,8 @@ SSH carried by the Tailscale network.
 
 - inspect the repository revision and dirty state;
 - validate, plan, simulate, and calculate capacity for the selected World;
-- check the configured LAN prefix and node reachability;
+- check the configured LAN prefix, node reachability, and fixed outbound IP,
+  DNS-resolution, and HTTPS probes;
 - report the Tailscale state of only `dns01`, `dns02`, and `dns03`;
 - read DNS health and produce a `home.arpa` plan with role-specific tokens;
 - optionally apply the tracked zone through the existing `dnsctl` gates.

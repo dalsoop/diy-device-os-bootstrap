@@ -94,9 +94,24 @@ if PATH="$temporary/bin:$PATH" \
     exit 1
 fi
 PATH="$temporary/bin:$PATH" \
-    "$repo_root/management/network-preflight" 10.0.0.1/16 \
+    "$repo_root/management/network-preflight" --offline 10.0.0.1/16 \
     > "$temporary/network.txt"
 grep -q '10.0.0.0/16 contains router and all DNS nodes' "$temporary/network.txt"
 pass network_preflight_rejects_24_and_accepts_16
 
-echo "RESULT $pass_count/5 management simulations passed"
+PATH="$temporary/bin:$PATH" \
+    "$repo_root/management/network-preflight" --json --offline 10.0.0.1/16 \
+    > "$temporary/network.json"
+jq -e '
+  .schema_version == 1 and
+  .operation == "network.preflight" and
+  .topology.valid == true and
+  (.topology.management_host_default_route.observed | type == "boolean") and
+  .internet.checked == false and
+  .internet.ready == null and
+  .network_gates.offline_dns_install.ready == true and
+  .network_gates.media_download.ready == null
+' "$temporary/network.json" >/dev/null
+pass network_preflight_offline_json_is_explicit
+
+echo "RESULT $pass_count/6 management simulations passed"

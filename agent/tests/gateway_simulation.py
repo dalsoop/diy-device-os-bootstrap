@@ -85,7 +85,14 @@ def main() -> None:
         )
         executable(
             root / "installer" / "management" / "network-preflight",
-            "#!/bin/sh\nset -eu\nprintf 'network %s\\n' \"$1\"\n",
+            "#!/bin/sh\n"
+            "set -eu\n"
+            "[ \"$1\" = --json ]\n"
+            "if [ \"${2:-}\" = --offline ]; then\n"
+            "  printf '{\"router_cidr\":\"%s\",\"internet_checked\":false}\\n' \"$3\"\n"
+            "else\n"
+            "  printf '{\"router_cidr\":\"%s\",\"internet_checked\":true}\\n' \"$2\"\n"
+            "fi\n",
         )
         executable(
             root / "installer" / "management" / "dnsctl",
@@ -118,6 +125,12 @@ def main() -> None:
             lambda: server.gateway.network_preflight("not-a-network"),
             "router_cidr is invalid",
         )
+        network = server.gateway.network_preflight("10.0.0.1/16")
+        assert network["data"]["internet_checked"] is True
+        offline_network = server.gateway.network_preflight(
+            "10.0.0.1/16", check_internet=False
+        )
+        assert offline_network["data"]["internet_checked"] is False
         os.environ["DEVICE_OS_AGENT_TAILSCALE_COMMAND"] = "relative/tailscale"
         expect_tool_error(
             server.gateway.tunnel_status,

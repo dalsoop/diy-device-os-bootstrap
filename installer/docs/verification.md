@@ -9,7 +9,8 @@ evidence.
 
 - `tests/install-gate-simulation.sh` passes all 13 cases, including Ventoy's
   `/dev/mapper/Ventoy` media path.
-- `tests/management-simulation.sh` passes all 4 cases.
+- `tests/management-simulation.sh` passes all 6 cases, including explicit
+  offline Internet state in the JSON preflight contract.
 - `tests/tailscale-enrollment-simulation.sh` passes without printing either
   OAuth or auth-key material.
 - `tests/media-catalog-simulation.sh` rejects duplicate identities, unknown
