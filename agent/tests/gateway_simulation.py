@@ -39,7 +39,7 @@ def expect_tool_error(action, text: str) -> None:
         raise AssertionError(f"expected ToolError containing: {text}")
 
 
-async def inspect_tools() -> None:
+async def inspect_tools(race_enabled: Path) -> None:
     async with Client(server.mcp) as client:
         listed = await client.list_tools()
         names = {tool.name for tool in listed.tools}
@@ -61,6 +61,13 @@ async def inspect_tools() -> None:
         validated = await client.call_tool("world_validate", {})
         assert validated.is_error is not True
         assert validated.structured_content["ok"] is True
+        race_enabled.touch()
+        inventory, dns = await asyncio.gather(
+            client.call_tool("world_plan", {"media": "inventory-capture"}),
+            client.call_tool("world_plan", {"media": "dns-bootstrap"}),
+        )
+        assert inventory.structured_content["data"]["media"] == "inventory-capture"
+        assert dns.structured_content["data"]["media"] == "dns-bootstrap"
 
 
 def main() -> None:
@@ -80,8 +87,25 @@ def main() -> None:
             root / "device-os",
             "#!/bin/sh\n"
             "set -eu\n"
-            "printf '{\"command\":\"%s %s\",\"offline\":\"%s\",\"media\":\"%s\"}\\n' "
-            '"${2:-}" "${3:-}" "${6:-}" "${DEVICE_OS_MEDIA:-}"\n',
+            "repo_root=$(CDPATH='' cd -- \"$(dirname -- \"$0\")\" && pwd)\n"
+            "selected=${DEVICE_OS_MEDIA:-dns-bootstrap}\n"
+            "plan=${DEVICE_OS_WORLD_PLAN:-$repo_root/work/device-os/world.json}\n"
+            "if [ -e \"$repo_root/race-enabled\" ] && [ \"${2:-}\" = plan ]; then\n"
+            "  mkdir -p \"$(dirname -- \"$plan\")\" \"$repo_root/race\"\n"
+            "  if [ \"$selected\" = inventory-capture ]; then\n"
+            "    printf '{\"media\":\"%s\"}\\n' \"$selected\" > \"$plan\"\n"
+            "    : > \"$repo_root/race/inventory-ready\"\n"
+            "    while [ ! -e \"$repo_root/race/dns-ready\" ]; do sleep 0.01; done\n"
+            "  else\n"
+            "    while [ ! -e \"$repo_root/race/inventory-ready\" ]; do sleep 0.01; done\n"
+            "    printf '{\"media\":\"%s\"}\\n' \"$selected\" > \"$plan\"\n"
+            "    : > \"$repo_root/race/dns-ready\"\n"
+            "  fi\n"
+            "  cat \"$plan\"\n"
+            "else\n"
+            "  printf '{\"command\":\"%s %s\",\"offline\":\"%s\",\"media\":\"%s\"}\\n' "
+            '"${2:-}" "${3:-}" "${6:-}" "$selected"\n'
+            "fi\n",
         )
         executable(
             root / "installer" / "management" / "network-preflight",
@@ -196,7 +220,7 @@ def main() -> None:
         assert recorded["has_openai_key"] is False
         assert "test-token" not in invocation.read_text(encoding="utf-8")
 
-        asyncio.run(inspect_tools())
+        asyncio.run(inspect_tools(root / "race-enabled"))
         print("agent gateway simulations: passed")
 
 

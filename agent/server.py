@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -132,15 +133,19 @@ class Gateway:
         self, operation: str, media: str | None = None
     ) -> dict[str, object]:
         selected_media = self._validate_media(media)
-        environment = (
-            {"DEVICE_OS_MEDIA": selected_media} if selected_media else None
-        )
-        return self._run(
-            f"world.{operation}",
-            [str(self.device_os), "world", operation],
-            timeout=120,
-            extra_environment=environment,
-        )
+        with tempfile.TemporaryDirectory(prefix="device-os-agent-world-") as temporary:
+            environment = {
+                "DEVICE_OS_WORLD_PLAN": str(Path(temporary) / "world.json"),
+                "USB_MEDIA_CATALOG": str(Path(temporary) / "catalog.json"),
+            }
+            if selected_media:
+                environment["DEVICE_OS_MEDIA"] = selected_media
+            return self._run(
+                f"world.{operation}",
+                [str(self.device_os), "world", operation],
+                timeout=120,
+                extra_environment=environment,
+            )
 
     def repository_status(self) -> dict[str, object]:
         revision = self._run(
@@ -193,15 +198,19 @@ class Gateway:
         ]
         if not allow_network_probe:
             arguments.append("--offline")
-        environment = (
-            {"DEVICE_OS_MEDIA": selected_media} if selected_media else None
-        )
-        return self._run(
-            "world.capacity",
-            arguments,
-            timeout=120,
-            extra_environment=environment,
-        )
+        with tempfile.TemporaryDirectory(prefix="device-os-agent-world-") as temporary:
+            environment = {
+                "DEVICE_OS_WORLD_PLAN": str(Path(temporary) / "world.json"),
+                "USB_MEDIA_CATALOG": str(Path(temporary) / "catalog.json"),
+            }
+            if selected_media:
+                environment["DEVICE_OS_MEDIA"] = selected_media
+            return self._run(
+                "world.capacity",
+                arguments,
+                timeout=120,
+                extra_environment=environment,
+            )
 
     def network_preflight(
         self, router_cidr: str, check_internet: bool = True
