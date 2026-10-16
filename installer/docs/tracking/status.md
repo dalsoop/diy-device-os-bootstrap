@@ -27,6 +27,7 @@ check mark does not imply successful physical installation.
 | Encrypted backup collection and explicit restore | Yes | Source checks | Isolated restore drill from collected backup |
 | One-off tagged Tailscale enrollment | Yes | Isolated simulation | Tailnet policy review and three-node reboot drill |
 | Portable read-only status monitor | Yes | Python syntax/source inspection | Run from the assembled USB against all nodes |
+| Constrained MCP gateway over Tailscale-carried SSH | Yes | Isolated tool and gate simulation | Dedicated account, ACL, forced command, and live three-node read test |
 | Router DHCP cutover and rollback | Procedure only | No | Live router change after all node gates |
 
 Current release state: source prototype. It is not yet a physically qualified

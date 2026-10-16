@@ -149,6 +149,8 @@ caller-supplied commit equal to current `HEAD`, and a clean zone file. It does
 not consume a saved plan, prove pull-request approval, or require every file in
 the checkout to be clean. It emits redacted JSONL audit events and does not
 expose credentials in arguments, URLs, or logs.
+`TECHNITIUM_CA_FILE` selects a reviewed CA bundle instead of bootstrap-only
+insecure TLS. The Agent Gateway requires that trusted mode for apply.
 
 ## Compatibility
 

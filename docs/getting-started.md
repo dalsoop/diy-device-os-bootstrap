@@ -247,6 +247,22 @@ credentials. Apply the router DHCP DNS change only after all node and rollback
 gates in [`installer/docs/network-cutover.md`](../installer/docs/network-cutover.md)
 pass.
 
+## 10. Connect an external agent without opening a router port
+
+Install the pinned Agent Gateway dependencies on the trusted management host,
+keep role-specific DNS token files outside Git, and expose `agent/run` only as a
+dedicated SSH forced command. The SSH service must be reachable only through
+the reviewed Tailscale policy and host firewall.
+
+The gateway's default tools are read-only validation, planning, capacity,
+network, tunnel, and DNS inspection. DNS apply is disabled by default and still
+delegates to `dnsctl` when explicitly enabled. USB burn, OS installation,
+restore, reinstall authorization, enrollment, arbitrary commands, arbitrary
+paths, and arbitrary URLs are never MCP tools.
+
+See [`agent/README.md`](../agent/README.md) for installation, credential paths,
+the forced-command example, and MCP client configuration.
+
 ## macOS boundary
 
 macOS supports the `world validate`, `world available`, `world plan`,

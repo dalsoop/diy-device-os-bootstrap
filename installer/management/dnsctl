@@ -3,6 +3,7 @@ set -euo pipefail
 
 url=${TECHNITIUM_URL:-https://10.0.5.1:53443}
 token_file=${TECHNITIUM_TOKEN_FILE:-}
+ca_file=${TECHNITIUM_CA_FILE:-}
 state_home=${XDG_STATE_HOME:-${HOME:?HOME is required}/.local/state}
 audit_log=${DNSCTL_AUDIT_LOG:-$state_home/dns-appliance/dnsctl-audit.jsonl}
 
@@ -21,7 +22,15 @@ api() {
     method=$1
     path=$2
     shift 2
-    curl --fail --silent --show-error --insecure -X "$method" \
+    tls_options=(--insecure)
+    if [ -n "$ca_file" ]; then
+        [ -r "$ca_file" ] || {
+            echo "dnsctl: configured CA file is not readable" >&2
+            return 1
+        }
+        tls_options=(--cacert "$ca_file")
+    fi
+    curl --fail --silent --show-error "${tls_options[@]}" -X "$method" \
         -H "Authorization: Bearer $token" "$url$path" "$@"
 }
 

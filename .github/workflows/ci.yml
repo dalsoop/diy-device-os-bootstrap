@@ -17,17 +17,25 @@ jobs:
           fetch-depth: 0
       - name: Install validation tools
         run: sudo apt-get update && sudo apt-get install -y jq ruby shellcheck
+      - name: Install pinned Agent Gateway dependencies
+        run: |
+          python3 -m venv /tmp/device-os-agent-ci
+          /tmp/device-os-agent-ci/bin/python -m pip install \
+            --requirement agent/requirements.lock
       - name: Check shell syntax
         run: |
+          bash -n agent/run
           find device-os installer catalog -type f -perm -u+x -print0 |
             xargs -0 -n1 bash -n
       - name: ShellCheck
         run: |
+          shellcheck agent/run
           find device-os installer catalog -type f -perm -u+x -print0 |
             xargs -0 shellcheck
       - name: Check Python syntax
         run: |
           python3 -c 'compile(open("installer/management/dns-appliance-status-monitor/server.py", encoding="utf-8").read(), "server.py", "exec")'
+          python3 -c 'compile(open("agent/server.py", encoding="utf-8").read(), "server.py", "exec")'
       - name: Check Ruby syntax
         run: |
           ruby -c world/bin/resolve-world
@@ -50,3 +58,5 @@ jobs:
           tests/media-catalog-simulation.sh
           tests/macos-writer-simulation.sh
           tests/repository-contract.sh
+      - name: Run Agent Gateway simulation
+        run: /tmp/device-os-agent-ci/bin/python agent/tests/gateway_simulation.py

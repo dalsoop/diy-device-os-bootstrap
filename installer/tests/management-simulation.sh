@@ -15,6 +15,7 @@ pass() {
 mkdir -p "$temporary/bin"
 cat > "$temporary/bin/curl" <<'EOF'
 #!/bin/sh
+[ -z "${MOCK_CURL_ARGS:-}" ] || printf '%s\n' "$@" > "$MOCK_CURL_ARGS"
 cat "$MOCK_CURRENT_ZONE"
 EOF
 cat > "$temporary/bin/ping" <<'EOF'
@@ -24,6 +25,7 @@ EOF
 chmod +x "$temporary/bin/curl" "$temporary/bin/ping"
 
 printf '%s\n' token > "$temporary/token"
+printf '%s\n' test-ca > "$temporary/technitium-ca.pem"
 cat > "$temporary/current.zone" <<'EOF'
 $ORIGIN home.arpa.
 $TTL 300
@@ -40,7 +42,9 @@ EOF
 
 PATH="$temporary/bin:$PATH" \
 MOCK_CURRENT_ZONE="$temporary/current.zone" \
+MOCK_CURL_ARGS="$temporary/curl.args" \
 TECHNITIUM_TOKEN_FILE="$temporary/token" \
+TECHNITIUM_CA_FILE="$temporary/technitium-ca.pem" \
 DNSCTL_AUDIT_LOG="$temporary/audit.jsonl" \
     "$repo_root/management/dnsctl" plan "$temporary/desired.zone" \
     > "$temporary/plan.json" 2> "$temporary/plan.diff"
@@ -50,6 +54,14 @@ grep -q '^+' "$temporary/plan.diff"
 jq -e '.action == "plan:home.arpa" and .result == "ok"' \
     "$temporary/audit.jsonl" >/dev/null
 pass dnsctl_plan_is_machine_readable_and_audited
+
+grep -Fx -- '--cacert' "$temporary/curl.args" >/dev/null
+grep -Fx -- "$temporary/technitium-ca.pem" "$temporary/curl.args" >/dev/null
+if grep -Fx -- '--insecure' "$temporary/curl.args" >/dev/null; then
+    echo "FAIL dnsctl retained insecure TLS with a configured CA" >&2
+    exit 1
+fi
+pass dnsctl_uses_configured_ca
 
 if PATH="$temporary/bin:$PATH" \
     MOCK_CURRENT_ZONE="$temporary/current.zone" \
@@ -87,4 +99,4 @@ PATH="$temporary/bin:$PATH" \
 grep -q '10.0.0.0/16 contains router and all DNS nodes' "$temporary/network.txt"
 pass network_preflight_rejects_24_and_accepts_16
 
-echo "RESULT $pass_count/4 management simulations passed"
+echo "RESULT $pass_count/5 management simulations passed"

@@ -98,6 +98,7 @@ diy-device-os-bootstrap/
 │   └── worlds/            append-only completed generations
 ├── catalog/               data-only public OS and bootloader metadata
 ├── installer/             resolution, verification, builders, and safety gates
+├── agent/                 constrained management-host MCP access plane
 ├── docs/                  monorepo architecture and decisions
 └── .github/workflows/     one CI and release surface
 ```
@@ -108,6 +109,8 @@ The module boundaries are security boundaries, not repository boundaries:
 - `catalog/` owns public metadata and never downloads, executes, or writes it.
 - `installer/` owns execution and independently validates Catalog and live
   targets before any destructive operation.
+- `agent/` exposes only reviewed commands through stdio and owns neither state
+  nor destructive authority.
 
 The embedded Catalog is locked by the monorepo commit and Catalog tree identity
 recorded in each resolved plan and completed World generation. Generated media,
@@ -133,3 +136,4 @@ interactive. Only the DNS profile has guarded unattended behavior.
 - [Installer operations](installer/docs/operations.md)
 - [Physical verification gates](installer/docs/verification.md)
 - [Catalog contracts](catalog/docs/contracts.md)
+- [Agent Gateway](agent/README.md)

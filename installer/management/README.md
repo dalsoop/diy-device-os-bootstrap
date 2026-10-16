@@ -47,7 +47,10 @@ The nodes must already be reachable at `10.0.5.1` through `10.0.5.3` by the
 operator SSH key. Enrollment requires Internet access to the Tailscale control
 plane but does not change the appliances' local DNS resolver or routing role.
 
-The MCP gateway source or deployment remains intentionally unvendored until its
-dependencies, authentication boundaries, audit behavior, and destructive tool
-gates are reviewed and pinned. It belongs on a management host, never on the DNS
-appliances. Until then, `dnsctl` is the auditable apply boundary.
+The reviewed MCP gateway now lives under [`../../agent`](../../agent). It runs
+on a management host, reaches this module only through a fixed command
+allowlist, and uses stdio through a Tailscale-constrained SSH forced command.
+`dnsctl` remains the delegated apply and audit boundary; the gateway cannot
+bypass its commit, clean-tree, confirmation, token, or TLS requirements. Set
+`TECHNITIUM_CA_FILE` to make `dnsctl` verify a reviewed CA; the Agent Gateway
+requires that mode for apply.
