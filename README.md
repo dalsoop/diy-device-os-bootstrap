@@ -1,6 +1,7 @@
 # DIY Device OS Bootstrap
 
 [![CI](https://github.com/dalsoop/diy-device-os-bootstrap/actions/workflows/ci.yml/badge.svg)](https://github.com/dalsoop/diy-device-os-bootstrap/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 This user-owned device bootstrap holds the complete source for a homelab World:
 operator intent, public operating-system metadata, guarded installation-media
@@ -137,3 +138,17 @@ interactive. Only the DNS profile has guarded unattended behavior.
 - [Physical verification gates](installer/docs/verification.md)
 - [Catalog contracts](catalog/docs/contracts.md)
 - [Agent Gateway](agent/README.md)
+
+## License
+
+Copyright (C) 2026 dalsoop.
+
+Repository-authored source code and documentation are licensed under the
+[GNU General Public License version 3 only](LICENSE), identified by the SPDX
+expression `GPL-3.0-only`.
+
+This license does not relicense third-party operating systems, bootloaders,
+packages, container images, trademarks, or installation media merely because
+the Catalog describes them or the Installer downloads them. Those materials
+remain subject to their respective upstream terms. Review and preserve the
+applicable upstream notices when distributing generated USB or ISO artifacts.
