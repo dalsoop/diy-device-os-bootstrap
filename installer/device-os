@@ -93,7 +93,7 @@ print_plan() {
       "] " + .menu_alias' "$resolved"
     echo
     if jq -e 'has("world")' "$resolved" >/dev/null; then
-        echo "World: $(jq -r '.world.world.name + " (" + .world.world.slug + ")' "$resolved")"
+        echo "World: $(jq -r '.world.world.name + " (" + .world.world.slug + ")"' "$resolved")"
         echo "Media definition: $(jq -r '.world.media.id' "$resolved")"
     else
         echo "Selection: Installer reference collection"

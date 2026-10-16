@@ -88,6 +88,7 @@ python3 -c 'import sys; compile(open(sys.argv[1], encoding="utf-8").read(), sys.
     "$repo_root/management/dns-appliance-status-monitor/server.py"
 "$repo_root/usb-media/resolve-catalog" >/dev/null
 "$repo_root/usb-media/verify-catalog" >/dev/null
+"$repo_root/device-os" world plan >/dev/null
 
 grep -q 'runtime-artifact' "$repo_root/README.md"
 grep -q 'locked-download' "$repo_root/usb-media/README.md"
