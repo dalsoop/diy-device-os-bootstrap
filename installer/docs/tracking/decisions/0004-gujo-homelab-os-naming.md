@@ -1,6 +1,6 @@
 # 0004: Adopt Gujo Homelab OS Repository Names
 
-Status: Superseded by root decision 0001
+Status: Superseded by root decisions 0001 and 0003
 
 ## Decision
 

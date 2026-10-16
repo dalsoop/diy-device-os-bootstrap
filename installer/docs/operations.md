@@ -75,14 +75,14 @@ The build must run on amd64 Debian 13. Retain the ISO, build manifest, package
 closure, checksums, and SBOM outside Git. A successful build is not permission
 to write media.
 
-## Write a Gujo Homelab OS USB
+## Burn a DIY Device OS USB
 
-Immediately before writing, inspect the attached devices and identify the
+Immediately before burning, inspect the attached devices and identify the
 removable target by path and serial. Unplug ambiguous devices. Use absolute
 paths for runtime artifacts.
 
 ```sh
-sudo ./device-os world write \
+sudo ./device-os world burn \
   --device /dev/sdX \
   --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
   --runtime-manifest dns-appliance=/absolute/path/build-manifest.json \

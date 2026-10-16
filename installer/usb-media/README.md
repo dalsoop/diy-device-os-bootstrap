@@ -1,4 +1,4 @@
-# Gujo Homelab OS USB
+# DIY Device OS USB
 
 This module combines public Catalog entries with Installer-local entries into a
 verified Korean-first Ventoy USB.
@@ -11,17 +11,18 @@ verified Korean-first Ventoy USB.
 ./device-os world capacity --capacity 16GB
 ./device-os world simulate
 ./device-os world prepare
-sudo ./device-os world write --device /dev/sdX ...
+sudo ./device-os world burn --device /dev/sdX ...
 ```
 
 `available`, `plan`, `capacity`, and `simulate` do not write a block device.
-`prepare` downloads into an ignored cache and verifies SHA-256. Only `write`
-partitions and overwrites the confirmed removable target.
+`prepare` downloads into an ignored cache and verifies SHA-256. Only `burn`
+partitions and overwrites the confirmed removable target. The command delegates
+to the internal writer after all safety checks pass.
 
 On macOS, a prepared full-disk image can be written and read back with:
 
 ```sh
-sudo ./device-os write-image-macos \
+sudo ./device-os burn-image-macos \
   --image /absolute/path/device-os.raw \
   --device /dev/diskN \
   --confirm 'ERASE /dev/diskN MEDIA_NAME EXACT_BYTES'
@@ -33,7 +34,7 @@ and verifies the image body while automatic mounting is impossible, commits and
 verifies the first MiB last, then unmounts and ejects. GPT images are rejected.
 Creating the full-disk image remains a separate build step. This repository does
 not currently provide a Linux/QEMU builder for that image, and Ventoy does not
-provide a native macOS installer. Use the Linux `./device-os world write` workflow for
+provide a native macOS installer. Use the Linux `./device-os world burn` workflow for
 complete USB assembly until a full-disk image builder is implemented.
 
 `capacity` sums selected image sizes, the enrollment reserve, and configured

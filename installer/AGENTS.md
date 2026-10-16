@@ -1,7 +1,7 @@
-# Gujo Homelab OS Installer
+# DIY Device OS Installer
 
 This engine module assembles verified public installation media into one
-multiboot USB inside the Gujo Homelab Device Bootstrap monorepo. Users manage it as one
+multiboot USB inside the DIY Device OS Bootstrap monorepo. Users manage it as one
 source of truth while this directory remains the execution boundary. General
 media composition is the primary product. The guarded
 offline installer for three HP DNS appliances is a bundled local reference

@@ -11,7 +11,7 @@ world_plan=${DEVICE_OS_WORLD_PLAN:-$repo_root/work/device-os/world.json}
 
 usage() {
     cat <<'EOF'
-Gujo Homelab Device Bootstrap
+DIY Device OS Bootstrap
 
 Usage:
   ./device-os world validate             Validate the selected World and media
@@ -20,7 +20,7 @@ Usage:
   ./device-os world capacity [options]   Check a size or physical device
   ./device-os world simulate             Run without downloads or disk writes
   ./device-os world prepare              Download and verify World-selected images
-  sudo ./device-os world write <options> Flash a verified removable USB on Linux
+  sudo ./device-os world burn <options>  Burn a verified removable USB on Linux
 
 Reference/contributor commands:
   ./device-os available                 List available catalog entries
@@ -30,15 +30,17 @@ Reference/contributor commands:
   ./device-os capacity [options]         Check a size or physical device
   ./device-os simulate                   Run without downloads or disk writes
   ./device-os prepare                    Download and verify selected images
-  sudo ./device-os write <options>       Flash a verified removable USB on Linux
-  sudo ./device-os write-image-macos <options>
-                                        Flash and verify a full-disk image on macOS
+  sudo ./device-os burn <options>        Burn a verified removable USB on Linux
+  sudo ./device-os burn-image-macos <options>
+                                        Burn and verify a full-disk image on macOS
 
-The write options match usb-media/write-usb-linux. Flashing erases the selected
-USB and requires the exact target-specific --confirm phrase.
+The burner delegates to the existing verified media writers. Burning erases the
+selected USB and requires the exact target-specific --confirm phrase. The old
+`write`, `world write`, and `write-image-macos` spellings remain compatibility
+aliases.
 
 macOS example:
-  sudo ./device-os write-image-macos \
+  sudo ./device-os burn-image-macos \
     --image /absolute/path/device-os.raw \
     --device /dev/disk5 \
     --confirm 'ERASE /dev/disk5 SanDisk 3.2Gen1 30784094208'
@@ -53,7 +55,7 @@ EOF
 }
 
 fail() {
-    echo "Gujo Homelab Device Bootstrap: $*" >&2
+    echo "DIY Device OS Bootstrap: $*" >&2
     exit 1
 }
 
@@ -81,7 +83,7 @@ resolve_world() {
 }
 
 print_plan() {
-    echo "Gujo Homelab OS USB contents"
+    echo "DIY Device OS USB contents"
     echo
     jq -r '.entries[] |
       "- [" +
@@ -175,7 +177,7 @@ case "$command" in
         show_plan
         echo
         echo "[3/4] Image download and SHA-256 verification: skipped"
-        echo "[4/4] USB erase and flash: skipped"
+        echo "[4/4] USB erase and burn: skipped"
         echo
         echo "Simulation complete: no network image or disk was changed."
         ;;
@@ -183,12 +185,12 @@ case "$command" in
         resolve
         USB_MEDIA_CATALOG=$resolved "$repo_root/usb-media/fetch-images"
         ;;
-    write)
+    burn|write)
         shift
         resolve
         USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/write-usb-linux" "$@"
         ;;
-    write-image-macos)
+    burn-image-macos|write-image-macos)
         shift
         exec "$repo_root/usb-media/write-image-macos" "$@"
         ;;
@@ -222,7 +224,7 @@ case "$command" in
                 print_plan
                 echo
                 echo "[3/4] Image download and SHA-256 verification: skipped"
-                echo "[4/4] USB erase and flash: skipped"
+                echo "[4/4] USB erase and burn: skipped"
                 echo
                 echo "Simulation complete: no network image or disk was changed."
                 ;;
@@ -230,7 +232,7 @@ case "$command" in
                 resolve_world
                 USB_MEDIA_CATALOG=$resolved "$repo_root/usb-media/fetch-images"
                 ;;
-            write)
+            burn|write)
                 shift
                 resolve_world
                 USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/write-usb-linux" "$@"

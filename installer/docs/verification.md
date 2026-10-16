@@ -58,7 +58,7 @@ evidence.
   routes/exit-node/Serve/Funnel/SSH, management-port ACLs, `tailscale ping`, and
   keyless reconnection after reboot.
 
-## Gujo Homelab OS USB gates
+## DIY Device OS USB gates
 
 - Verify Ventoy, Debian Live, Proxmox VE, Proxmox Backup Server, TrueNAS SCALE,
   and Pop!_OS against committed SHA-256 locks before copying.

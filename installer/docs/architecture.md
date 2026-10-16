@@ -21,7 +21,7 @@ verification tools, and explicit management commands.
 ## World boundary
 
 The user-owned
-[World module](https://github.com/dalsoop/gujo-homelab-device-bootstrap/tree/main/world)
+[World module](https://github.com/dalsoop/diy-device-os-bootstrap/tree/main/world)
 is the source of environment intent. It selects Catalog entries, binds intent to the user's
 devices, and provide policy to this Installer without moving Installer behavior
 or long-lived secrets into the World module.
@@ -53,7 +53,7 @@ usb-media/resolve-catalog <--- World selection + collections/ groups + local-ent
         fetch    Ventoy    USB writer
                              |
                              v
-                    Gujo Homelab OS USB
+                    DIY Device OS USB
 
 DNS runtime artifact
 installer/ --> guarded ISO --> USB local entry

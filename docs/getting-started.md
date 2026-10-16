@@ -25,9 +25,9 @@ a USB was written or a machine was installed.
 Create a GitHub fork for your homelab, then clone that fork:
 
 ```sh
-git clone https://github.com/<your-account>/gujo-homelab-device-bootstrap.git
-cd gujo-homelab-device-bootstrap
-git remote add upstream https://github.com/dalsoop/gujo-homelab-device-bootstrap.git
+git clone https://github.com/<your-account>/diy-device-os-bootstrap.git
+cd diy-device-os-bootstrap
+git remote add upstream https://github.com/dalsoop/diy-device-os-bootstrap.git
 ```
 
 Keep personal intent in your fork. Before adopting an upstream change, review
@@ -171,7 +171,7 @@ Catalog SHA-256:
 
 The verified cache is ignored by Git. Do not commit downloaded media.
 
-## 7. Identify and write the USB on Linux
+## 7. Identify and burn the USB on Linux
 
 The complete multiboot assembly requires Linux, root access, and the utilities
 checked by the writer. On Debian or Ubuntu, install the additional runtime
@@ -188,11 +188,11 @@ current device path and serial instead of reusing a previous command:
 lsblk -d -o NAME,MODEL,SERIAL,SIZE,TRAN,RM
 ```
 
-Run an exact capacity check with the built DNS artifact before writing. Then
-write the selected public media and guarded DNS image:
+Run an exact capacity check with the built DNS artifact before burning. Then
+burn the selected public media and guarded DNS image:
 
 ```sh
-sudo ./device-os world write \
+sudo ./device-os world burn \
   --device /dev/sdX \
   --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
   --runtime-manifest dns-appliance=/absolute/path/build-manifest.json \
@@ -205,7 +205,7 @@ unverified artifacts, and an inexact confirmation phrase.
 
 ## 8. Verify, boot, and install
 
-After writing:
+After burning:
 
 1. From the mounted `DEVICE-INST` root, verify the resolved Catalog and every
    staged image:
@@ -251,17 +251,17 @@ pass.
 
 macOS supports the `world validate`, `world available`, `world plan`,
 `world capacity`, and `world simulate` commands. The command
-below writes and verifies an already prepared exact-size MBR full-disk image:
+below burns and verifies an already prepared exact-size MBR full-disk image:
 
 ```sh
-sudo ./device-os write-image-macos \
+sudo ./device-os burn-image-macos \
   --image /absolute/path/device-os.raw \
   --device /dev/diskN \
   --confirm 'ERASE /dev/diskN MEDIA_NAME EXACT_BYTES'
 ```
 
 This repository does not currently provide the Linux/QEMU builder that creates
-`device-os.raw`. Use the Linux `./device-os world write` workflow for complete USB
+`device-os.raw`. Use the Linux `./device-os world burn` workflow for complete USB
 assembly until such a builder is implemented and verified.
 
 ## World generation boundary

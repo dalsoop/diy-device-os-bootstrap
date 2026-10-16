@@ -14,7 +14,7 @@ independent release benefit.
 
 ## Decision
 
-`dalsoop/gujo-homelab-device-bootstrap` is the canonical repository. It contains three explicit
+`dalsoop/diy-device-os-bootstrap` is the canonical repository. It contains three explicit
 modules:
 
 - `world/` for operator intent and immutable USB generations;

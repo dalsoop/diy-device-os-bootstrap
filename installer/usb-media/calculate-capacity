@@ -408,7 +408,7 @@ if [ "$json_output" -eq 1 ]; then
     exit 0
 fi
 
-echo "Gujo Homelab OS USB capacity plan"
+echo "DIY Device OS USB capacity plan"
 echo
 jq -r '.entries[] |
   if .bytes == null then

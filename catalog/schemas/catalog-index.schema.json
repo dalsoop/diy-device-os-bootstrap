@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/dalsoop/gujo-homelab-device-bootstrap/blob/main/catalog/schemas/catalog-index.schema.json",
-  "title": "Gujo Homelab OS Catalog Index",
+  "$id": "https://github.com/dalsoop/diy-device-os-bootstrap/blob/main/catalog/schemas/catalog-index.schema.json",
+  "title": "DIY Device OS Catalog Index",
   "type": "object",
   "required": ["schema_version", "name", "repository", "bootloaders", "entries"],
   "properties": {

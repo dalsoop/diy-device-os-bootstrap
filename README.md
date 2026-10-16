@@ -1,14 +1,15 @@
-# Gujo Homelab Device Bootstrap
+# DIY Device OS Bootstrap
 
-[![CI](https://github.com/dalsoop/gujo-homelab-device-bootstrap/actions/workflows/ci.yml/badge.svg)](https://github.com/dalsoop/gujo-homelab-device-bootstrap/actions/workflows/ci.yml)
+[![CI](https://github.com/dalsoop/diy-device-os-bootstrap/actions/workflows/ci.yml/badge.svg)](https://github.com/dalsoop/diy-device-os-bootstrap/actions/workflows/ci.yml)
 
 This user-owned device bootstrap holds the complete source for a homelab World:
 operator intent, public operating-system metadata, guarded installation-media
 tooling, and the append-only record of verified physical USB generations.
 
-The repository and product are **Gujo Homelab Device Bootstrap**. The operator
-command remains `device-os`, and the generated removable-media product remains
-**Gujo Homelab OS USB**.
+The repository and product are **DIY Device OS Bootstrap**. The operator
+command remains `device-os`; its destructive USB surface is the **Device OS
+Burner** exposed through `burn`, and the generated removable-media product is
+**DIY Device OS USB**.
 
 This monorepo replaces the former World Playbook, OS Installer, and OS Catalog
 repository split. The boundaries still exist as modules, but users clone or
@@ -25,12 +26,12 @@ consumers in one pull request.
 Clone one repository:
 
 ```sh
-git clone https://github.com/dalsoop/gujo-homelab-device-bootstrap.git
-cd gujo-homelab-device-bootstrap
+git clone https://github.com/dalsoop/diy-device-os-bootstrap.git
+cd diy-device-os-bootstrap
 ```
 
 Follow the [Getting Started guide](docs/getting-started.md) for the implemented
-fork, selection, capacity, DNS build, Linux USB write, verification, and
+fork, selection, capacity, DNS build, Linux USB burn, verification, and
 enrollment workflow.
 
 The example [`world/drafts/gujo-home/world.yaml`](world/drafts/gujo-home/world.yaml)
@@ -53,6 +54,18 @@ Use the root command for read-only media operations:
 `simulate` does not download images or write a disk. A capacity check may make
 small HTTPS size probes unless `--offline` is supplied. Destructive USB commands
 retain live target checks and require an exact device-specific confirmation.
+On a supported Linux builder, the preferred destructive surface is:
+
+```sh
+sudo ./device-os world burn \
+  --device /dev/sdX \
+  --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
+  --runtime-manifest dns-appliance=/absolute/path/build-manifest.json \
+  --confirm 'ERASE /dev/sdX USB_SERIAL'
+```
+
+Resolve the current removable target and serial immediately before every burn;
+never reuse this placeholder or a previous confirmation.
 
 ## One World, accumulating USB generations
 
@@ -77,7 +90,7 @@ generations are never edited or replaced.
 ## Repository map
 
 ```text
-gujo-homelab-device-bootstrap/
+diy-device-os-bootstrap/
 ├── device-os              root operator command
 ├── world/                 user intent and immutable USB generations
 │   ├── drafts/            mutable desired state
@@ -115,6 +128,7 @@ interactive. Only the DNS profile has guarded unattended behavior.
 - [Security boundaries](docs/security.md)
 - [Migration decision](docs/tracking/decisions/0001-consolidate-into-one-monorepo.md)
 - [World selection decision](docs/tracking/decisions/0002-world-drives-operator-media-selection.md)
+- [Product naming decision](docs/tracking/decisions/0003-adopt-diy-device-os-bootstrap-name.md)
 - [World contract](world/docs/contracts.md)
 - [Installer operations](installer/docs/operations.md)
 - [Physical verification gates](installer/docs/verification.md)

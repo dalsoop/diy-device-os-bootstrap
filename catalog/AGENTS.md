@@ -1,4 +1,4 @@
-# Gujo Homelab OS Catalog
+# DIY Device OS Catalog
 
 This module is the public, data-only source of bootloader and operating-system
 metadata consumed by the sibling Installer. It publishes
