@@ -138,14 +138,18 @@ interactive. Only the DNS profile has guarded unattended behavior.
 - [Physical verification gates](installer/docs/verification.md)
 - [Catalog contracts](catalog/docs/contracts.md)
 - [Agent Gateway](agent/README.md)
+- [License history](LICENSE_HISTORY.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## License
 
 Copyright (C) 2026 dalsoop.
 
-Repository-authored source code and documentation are licensed under the
+Except where a file-specific or upstream notice states otherwise, all original
+content authored for this repository is licensed under the
 [GNU General Public License version 3 only](LICENSE), identified by the SPDX
-expression `GPL-3.0-only`.
+expression `GPL-3.0-only`. The exact MIT-to-GPL transition boundary is recorded
+in [LICENSE_HISTORY.md](LICENSE_HISTORY.md).
 
 This license does not relicense third-party operating systems, bootloaders,
 packages, container images, trademarks, or installation media merely because
