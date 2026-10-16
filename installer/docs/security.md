@@ -81,9 +81,11 @@ fingerprint verification.
 | Enrollment and restore decryption | Dedicated age identity on the management host | Decryption or archive validation failure stops import or restore |
 | Tailscale control plane | Protected OAuth client files mint one temporary node key | Enrollment failure revokes the current key when possible and stops that node |
 
-Technitium commands currently use TLS while allowing an unverified certificate
-during bootstrap and restore. Operators must compare the enrolled certificate
-fingerprint and complete trusted TLS configuration before enabling agent writes.
+Technitium commands allow an unverified certificate during bootstrap and
+restore compatibility. `dnsctl` verifies the configured CA when
+`TECHNITIUM_CA_FILE` is set, and the Agent Gateway requires that trusted mode
+for writes. Operators must compare the enrolled certificate fingerprint and
+complete trusted TLS configuration before enabling agent writes.
 
 ## Audit coverage
 

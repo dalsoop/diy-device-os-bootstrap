@@ -1,0 +1,13 @@
+{
+  "tagOwners": {
+    "tag:device-os-management": ["autogroup:admin"],
+  },
+
+  "grants": [
+    {
+      "src": ["autogroup:admin"],
+      "dst": ["tag:device-os-management"],
+      "ip": ["tcp:22"],
+    },
+  ],
+}

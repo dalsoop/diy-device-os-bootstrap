@@ -21,6 +21,9 @@ for file in \
     management/import-enrollment \
     management/collect-backups \
     management/tailscale-enroll \
+    ../agent/run \
+    ../agent/server.py \
+    ../agent/tests/gateway_simulation.py \
     device-os \
     usb-media/fetch-images \
     usb-media/resolve-catalog \
@@ -54,6 +57,10 @@ for required in \
     docs/tracking/decisions/0002-pinned-declarative-catalog.md \
     management/dns-appliance-status-monitor/config.json \
     management/dns-appliance-status-monitor/server.py \
+    ../agent/AGENTS.md \
+    ../agent/README.md \
+    ../agent/requirements.lock \
+    ../agent/tailscale-policy.example.hujson \
     ../world/world-playbook.yaml \
     ../world/drafts/gujo-home/world.yaml \
     ../.github/workflows/ci.yml; do
@@ -86,6 +93,8 @@ python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \
     "$repo_root/usb-media/local-entries/dns-appliance.json"
 python3 -c 'import sys; compile(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1], "exec")' \
     "$repo_root/management/dns-appliance-status-monitor/server.py"
+python3 -c 'import sys; compile(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1], "exec")' \
+    "$repo_root/../agent/server.py"
 "$repo_root/usb-media/resolve-catalog" >/dev/null
 "$repo_root/usb-media/verify-catalog" >/dev/null
 "$repo_root/device-os" world plan >/dev/null

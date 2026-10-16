@@ -1,6 +1,6 @@
 # Monorepo Architecture
 
-## One repository, three trust domains
+## One repository, three source domains and one access plane
 
 DIY Device OS Bootstrap is intentionally one repository so a World change, Catalog change,
 Installer consumer change, fixtures, and documentation can land atomically.
@@ -8,6 +8,9 @@ The former repository boundaries remain explicit module and runtime trust
 boundaries.
 
 ```text
+remote MCP client -- Tailscale + forced SSH --> agent/ access plane
+                                                   |
+                                                   v
 world/ desired state
        |
        | validated selection and policy
@@ -22,6 +25,12 @@ verified image -> confirmed physical USB -> immutable World generation
 though it shares a checkout. The Installer validates World, Catalog, and
 Installer-local input before use and alone owns download, assembly, or
 disk-write behavior.
+
+`agent/` is a constrained access plane on a trusted management host. It owns no
+state or execution policy: its MCP tools delegate to the root `device-os`
+surface and reviewed `installer/management/` commands. Remote MCP clients use a
+forced ordinary-SSH command over Tailscale; the gateway opens no HTTP listener
+and never runs on a DNS appliance.
 
 The World-to-Installer selection edge is implemented through `device-os world
 validate/plan/capacity/simulate/prepare/burn`. The reference collection still
@@ -52,6 +61,7 @@ release and physical-write paths may not.
 | Generated workspace | Ephemeral and ignored | `installer/work/` and caches |
 | Completed USB generation | Immutable, append-only | `world/worlds/<generation-id>/` |
 | Secret values | External | Principal secret store |
+| Agent access plane | Reviewed | `agent/`; runtime and credentials stay on management host |
 
 ## User surface
 

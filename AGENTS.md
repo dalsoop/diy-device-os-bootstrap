@@ -10,6 +10,8 @@ append-only physical USB generation evidence.
 - `catalog/` owns reusable data-only OS and bootloader metadata.
 - `installer/` owns execution, download verification, builders, and destructive
   safety gates.
+- `agent/` owns the constrained management-host MCP access plane and delegates
+  execution to reviewed root and Installer commands.
 - The principal secret store owns long-lived credentials and private keys.
 - Generated media, caches, real inventory, enrollment output, and recovery
   material remain ignored and outside Git.
@@ -17,6 +19,9 @@ append-only physical USB generation evidence.
 Repository consolidation does not weaken these boundaries. Catalog data is
 never executable, World intent is never erasure authorization, and Installer
 target checks remain independent of both.
+
+The Agent Gateway does not add authority: it cannot expose arbitrary execution
+or any media, installation, restore, reinstall, or enrollment operation.
 
 ## Hard rules
 
