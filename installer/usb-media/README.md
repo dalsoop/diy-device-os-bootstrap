@@ -92,8 +92,15 @@ DEVICE-INST/                   11-character exFAT label used by Ventoy's bundled
 ├── manifests/
 │   ├── media-catalog.json
 │   ├── MEDIA-CATALOG.SHA256
+│   ├── LICENSES.SHA256
 │   ├── dns-build-manifest.json
 │   └── SHA256SUMS
+├── licenses/
+│   ├── DIY-DEVICE-OS-BOOTSTRAP-GPL-3.0.txt
+│   ├── LICENSE_HISTORY.md
+│   ├── THIRD_PARTY_NOTICES.md
+│   ├── Tailscale-BSD-3-Clause.txt
+│   └── SOURCE.md
 ├── ventoy/ventoy.json
 ├── README_KO.txt
 └── README_EN.txt
@@ -104,7 +111,7 @@ DNS-ENROLL/                 present only with the DNS profile
 └── reinstall/
 ```
 
-After writing, verify the resolved Catalog digest and every image checksum from
-the USB itself. Physical boot and installation remain separate verification
-gates.
+After writing, verify the resolved Catalog digest, every image checksum, and
+`manifests/LICENSES.SHA256` from the USB itself. Physical boot, installation,
+and exact-artifact redistribution review remain separate verification gates.
 

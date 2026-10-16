@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
 set -eu
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -34,5 +36,11 @@ case "$TAILSCALE_AMD64_URL" in
 esac
 printf '%s' "$TAILSCALE_AMD64_SHA256" | grep -Eq '^[0-9a-f]{64}$' ||
     fail "invalid Tailscale SHA-256"
+case "$TAILSCALE_LICENSES_URL" in
+    https://raw.githubusercontent.com/tailscale/tailscale/v"$TAILSCALE_VERSION"/licenses/tailscale.md) ;;
+    *) fail "Tailscale dependency-license URL is not version pinned" ;;
+esac
+printf '%s' "$TAILSCALE_LICENSES_SHA256" | grep -Eq '^[0-9a-f]{64}$' ||
+    fail "invalid Tailscale dependency-license SHA-256"
 
 echo "source locks: valid"

@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
 set -eu
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -64,7 +66,11 @@ for required in \
     ../agent/tailscale-policy.example.hujson \
     ../world/world-playbook.yaml \
     ../world/drafts/gujo-home/world.yaml \
-    ../.github/workflows/ci.yml; do
+    ../.github/workflows/ci.yml \
+    ../LICENSE \
+    ../LICENSE_HISTORY.md \
+    ../THIRD_PARTY_NOTICES.md \
+    ../third_party/licenses/Tailscale-BSD-3-Clause.txt; do
     [ -r "$repo_root/$required" ] || {
         echo "repository-contract: missing $required" >&2
         exit 1
@@ -81,6 +87,16 @@ grep -q 'Authorization: Bearer' "$repo_root/installer/payload/dns-appliance-heal
 grep -q 'unzip -t' "$repo_root/installer/payload/dns-appliance-backup"
 grep -q 'iifname "tailscale0"' "$repo_root/installer/payload/nftables.conf"
 grep -q 'preauthorized:true' "$repo_root/management/tailscale-enroll"
+grep -q 'TAILSCALE_LICENSES_SHA256' "$repo_root/build/locks/sources.env"
+grep -q 'tailscale-dependency-licenses.md' "$repo_root/installer/build-image"
+grep -q 'licenseDeclared:"NOASSERTION"' "$repo_root/installer/build-image"
+grep -q 'licenseDeclared:"GPL-3.0-only"' "$repo_root/installer/build-image"
+grep -q '/usr/share/doc/diy-device-os-bootstrap/SOURCE.md' \
+    "$repo_root/installer/simple-cdd/profiles/dns.postinst"
+grep -q 'manifests/LICENSES.SHA256' "$repo_root/usb-media/write-usb-linux"
+grep -q 'Source revision:' "$repo_root/usb-media/write-usb-linux"
+grep -q 'resolved catalog revision does not match the checkout' \
+    "$repo_root/usb-media/write-usb-linux"
 
 python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \
     "$repo_root/schemas/enrollment-record.schema.json"

@@ -139,6 +139,7 @@ interactive. Only the DNS profile has guarded unattended behavior.
 - [Catalog contracts](catalog/docs/contracts.md)
 - [Agent Gateway](agent/README.md)
 - [License history](LICENSE_HISTORY.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## License
@@ -156,3 +157,5 @@ packages, container images, trademarks, or installation media merely because
 the Catalog describes them or the Installer downloads them. Those materials
 remain subject to their respective upstream terms. Review and preserve the
 applicable upstream notices when distributing generated USB or ISO artifacts.
+The reviewed upstream inventory and the limits of that review are recorded in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

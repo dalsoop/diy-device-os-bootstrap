@@ -17,6 +17,25 @@ jobs:
           fetch-depth: 0
       - name: Install validation tools
         run: sudo apt-get update && sudo apt-get install -y jq ruby shellcheck
+      - name: Check project license notices
+        shell: bash
+        run: |
+          test -r LICENSE
+          test -r LICENSE_HISTORY.md
+          test -r THIRD_PARTY_NOTICES.md
+          test -r third_party/licenses/Tailscale-BSD-3-Clause.txt
+          missing=0
+          while IFS= read -r file; do
+            if ! grep -q '^# SPDX-FileCopyrightText: 2026 dalsoop$' "$file"; then
+              echo "missing SPDX copyright header: $file" >&2
+              missing=1
+            fi
+            if ! grep -q '^# SPDX-License-Identifier: GPL-3.0-only$' "$file"; then
+              echo "missing SPDX license header: $file" >&2
+              missing=1
+            fi
+          done < <(git ls-files --stage | awk '$1 == "100755" { print $4 }')
+          test "$missing" -eq 0
       - name: Install pinned Agent Gateway dependencies
         run: |
           python3 -m venv /tmp/device-os-agent-ci

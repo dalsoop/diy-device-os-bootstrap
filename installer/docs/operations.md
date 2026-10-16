@@ -111,8 +111,9 @@ sudo ./device-os world burn \
 
 The operation destroys the selected USB. Never reuse a prior command without
 resolving the target again. After writing, verify the copied resolved catalog,
-its digest, and every entry in `manifests/SHA256SUMS`, then safely unmount and
-eject.
+its digest, every entry in `manifests/SHA256SUMS`, and every entry in
+`manifests/LICENSES.SHA256`. Confirm that `licenses/SOURCE.md` names the exact
+Git commit used for the burn, then safely unmount and eject.
 
 ## Install and enroll DNS appliances
 
@@ -185,7 +186,9 @@ active.
 
 Release evidence records the exact Git commit, Catalog tree identity, source
 locks, build environment, commands, checksums, package closure, SBOM, and
-observed gate results. Publish checksums and manifests, not ignored media or
-credentials. If any physical or network gate remains incomplete, label the
-candidate accordingly.
+observed gate results. It also records the project license bundle, third-party
+notice inventory, and the result of an exact-artifact redistribution review.
+Publish checksums and manifests, not ignored media or credentials. If any
+physical, network, or license gate remains incomplete, label the candidate
+accordingly and do not distribute the generated USB, ISO, or appliance image.
 
