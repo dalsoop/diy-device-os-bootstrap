@@ -2,8 +2,8 @@
 
 ## Purpose
 
-The World module is the user-owned source of intent inside Gujo Homelab OS
-Playbook. The Catalog answers what operating systems are available, the
+The World module is the user-owned source of intent inside DIY Device OS
+Bootstrap. The Catalog answers what operating systems are available, the
 Installer owns how media is resolved and written safely, and the World module
 records what one homelab intended to place on one USB generation.
 

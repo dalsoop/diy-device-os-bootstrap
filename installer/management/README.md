@@ -30,7 +30,7 @@ Implemented bootstrap and operating surfaces:
 - `dns-appliance-status-monitor/start` launches a dependency-free Korean status
   page on `127.0.0.1:8080` and checks DNS over UDP/TCP plus Cockpit,
   Technitium, and node-exporter connectivity for all three nodes. It is
-  read-only and is also copied onto the Gujo Homelab OS USB.
+  read-only and is also copied onto the DIY Device OS USB.
 
 Before enrollment, merge the relevant parts of
 `tailscale-policy.example.hujson` into the reviewed tailnet policy and create an

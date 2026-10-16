@@ -37,14 +37,16 @@ unfinished.
 ## Destructive workflow
 
 On a supported Linux builder, `prepare` downloads and verifies selected public
-media. After separately building the DNS runtime artifact, `write` requires a
-removable non-root target, a readable serial, sufficient capacity, and the exact
-`ERASE <device> <serial>` confirmation.
+media. After separately building the DNS runtime artifact, the `burn` command
+requires a removable non-root target, a readable serial, sufficient capacity,
+and the exact `ERASE <device> <serial>` confirmation.
 
-macOS may write a previously prepared, exact-size MBR disk image through the
-guarded `write-image-macos` path. This repository does not yet provide the
+macOS may burn a previously prepared, exact-size MBR disk image through the
+guarded `burn-image-macos` command. This repository does not yet provide the
 Linux/QEMU builder for that image; complete USB assembly uses the Linux
-`device-os write` path.
+`device-os burn` path. The burn commands delegate to the existing internal
+writer implementations; the old write command spellings remain compatibility
+aliases.
 
 Read [operations](docs/operations.md), [security](docs/security.md), and the
 [physical verification gates](docs/verification.md) before any release or disk

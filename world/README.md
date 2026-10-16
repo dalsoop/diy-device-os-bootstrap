@@ -1,7 +1,7 @@
 # World
 
-This module is the user-owned source of homelab intent inside Gujo Homelab
-Device Bootstrap. It describes physical assets, networks, logical nodes,
+This module is the user-owned source of homelab intent inside DIY Device OS
+Bootstrap. It describes physical assets, networks, logical nodes,
 services, selected installation media, and safety policy.
 
 The mutable draft is [`drafts/gujo-home/world.yaml`](drafts/gujo-home/world.yaml).

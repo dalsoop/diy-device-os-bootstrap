@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/dalsoop/gujo-homelab-device-bootstrap/blob/main/catalog/schemas/media-entry.schema.json",
+  "$id": "https://github.com/dalsoop/diy-device-os-bootstrap/blob/main/catalog/schemas/media-entry.schema.json",
   "title": "Device OS Entry",
   "type": "object",
   "required": ["schema_version", "id", "group", "version", "destination", "menu_alias", "description_ko", "description_en", "boot_behavior", "profile_adapter", "source"],

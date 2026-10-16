@@ -12,7 +12,8 @@
 | `world capacity [options]` | Calculates World-selected media and target fit without writing |
 | `world simulate` | Reports skipped download/write phases for the World selection |
 | `world prepare` | Downloads and verifies World-selected locked artifacts |
-| `world write ...` | Destructively assembles the confirmed removable USB from the World selection |
+| `world burn ...` | Destructively assembles the confirmed removable USB from the World selection |
+| `world write ...` | Compatibility alias for `world burn` |
 | `available` | Reads/resolves Catalog and prints selection state |
 | `include <id>` | Adds a valid public ID to the collection |
 | `exclude <id>` | Removes an ID from the collection |
@@ -20,14 +21,16 @@
 | `capacity [options]` | Calculates selected media, reserve, overhead, and target fit without writing |
 | `simulate` | Runs resolution and reports skipped download/write phases |
 | `prepare` | Downloads and verifies locked public artifacts |
-| `write ...` | Destructively assembles the confirmed removable USB |
-| `write-image-macos ...` | Destructively writes a confirmed, size-matched removable disk from an MBR raw image |
+| `burn ...` | Destructively assembles the confirmed removable USB |
+| `write ...` | Compatibility alias for `burn` |
+| `burn-image-macos ...` | Destructively writes a confirmed, size-matched removable disk from an MBR raw image |
+| `write-image-macos ...` | Compatibility alias for `burn-image-macos` |
 
 Usage errors exit nonzero. A rejected contract, digest, device, or confirmation
 exits nonzero. Success output is human-facing; JSON files are the automation
 surface.
 
-`write-image-macos` requires an MBR image larger than 1 MiB whose byte size
+`burn-image-macos` requires an MBR image larger than 1 MiB whose byte size
 equals the target. It rejects GPT, internal, virtual, non-removable, and
 non-writable targets before the first write. After exact confirmation, it
 invalidates the old first MiB, writes and reads back the remaining bytes, then

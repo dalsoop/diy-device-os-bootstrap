@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "device-os",
-  "name": "Default Gujo Homelab OS USB",
+  "name": "Default DIY Device OS USB",
   "groups": [
     { "id": "dns", "path": "images/01-dns", "menu_alias": "01 DNS 서버" },
     { "id": "virtualization", "path": "images/02-virtualization", "menu_alias": "02 가상화 및 백업" },

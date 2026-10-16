@@ -1,6 +1,6 @@
-# Gujo Homelab Device Bootstrap
+# DIY Device OS Bootstrap
 
-This user-owned device-bootstrap monorepo is the single source of truth for one
+This user-owned device-OS bootstrap monorepo is the single source of truth for one
 homelab World, public OS metadata, guarded installation-media tooling, and
 append-only physical USB generation evidence.
 

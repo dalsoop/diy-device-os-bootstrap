@@ -2,7 +2,7 @@
 
 ## One repository, three trust domains
 
-Gujo Homelab Device Bootstrap is intentionally one repository so a World change, Catalog change,
+DIY Device OS Bootstrap is intentionally one repository so a World change, Catalog change,
 Installer consumer change, fixtures, and documentation can land atomically.
 The former repository boundaries remain explicit module and runtime trust
 boundaries.
@@ -24,7 +24,7 @@ Installer-local input before use and alone owns download, assembly, or
 disk-write behavior.
 
 The World-to-Installer selection edge is implemented through `device-os world
-validate/plan/capacity/simulate/prepare/write`. The reference collection still
+validate/plan/capacity/simulate/prepare/burn`. The reference collection still
 defines menu groups and a contributor fallback, while ordinary selection comes
 from `world/drafts/<slug>/world.yaml`. Immutable-generation publication after a
 verified physical write remains unimplemented.

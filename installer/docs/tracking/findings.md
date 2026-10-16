@@ -3,7 +3,7 @@
 ## Physical qualification is incomplete
 
 The repository has simulations and source contracts, but no recorded end-to-end
-physical Gujo Homelab OS USB qualification on the target HP hardware. This
+physical DIY Device OS USB qualification on the target HP hardware. This
 cannot be closed in source alone because firmware, removable-media behavior,
 disk identity, Secure Boot, and power-loss behavior require disposable media
 and controlled physical access.

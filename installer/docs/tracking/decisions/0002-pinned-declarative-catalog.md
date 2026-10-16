@@ -12,8 +12,8 @@ inject executable behavior into Installer consumers.
 
 ## Decision
 
-Public bootloader and OS metadata live as one JSON file per item in the Gujo
-Homelab OS Catalog. A World Playbook pins an exact Catalog commit, selects
+Public bootloader and OS metadata live as one JSON file per item in the DIY
+Device OS Catalog. A World Playbook pins an exact Catalog commit, selects
 public IDs, and keeps private or profile-specific entries locally. The Installer
 resolver fetches data only, validates it with Installer-owned rules, and emits
 one resolved plan for downstream stages.

@@ -26,7 +26,7 @@ jq -e '
     (split("/") | all(. != "" and . != "." and . != ".."));
   .schema_version == 1 and
   (.product.name | type == "string" and length > 0) and
-  .product.repository == "https://github.com/dalsoop/gujo-homelab-device-bootstrap" and
+  .product.repository == "https://github.com/dalsoop/diy-device-os-bootstrap" and
   .catalog.kind == "workspace" and
   (.catalog.path | safe_rel) and
   (.catalog.index | safe_rel) and

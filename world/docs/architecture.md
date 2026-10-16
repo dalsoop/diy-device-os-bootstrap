@@ -3,7 +3,7 @@
 ## Module role
 
 The World module is the user-owned source of desired homelab state inside the
-single Gujo Homelab Device Bootstrap repository.
+single DIY Device OS Bootstrap repository.
 
 ```text
 catalog/

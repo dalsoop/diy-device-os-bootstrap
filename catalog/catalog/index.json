@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "name": "Gujo Homelab OS Catalog",
-  "repository": "https://github.com/dalsoop/gujo-homelab-device-bootstrap",
+  "name": "DIY Device OS Catalog",
+  "repository": "https://github.com/dalsoop/diy-device-os-bootstrap",
   "bootloaders": [
     { "id": "ventoy", "path": "catalog/bootloaders/ventoy.json" }
   ],
