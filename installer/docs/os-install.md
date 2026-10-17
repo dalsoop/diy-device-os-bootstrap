@@ -20,13 +20,16 @@ requires all of the following:
    serial hash, and minimum byte size.
 3. The matched disk is not the physical parent of the device that supplied
    `/cdrom`, including a Ventoy device-mapper path.
-4. The target and its partitions are not mounted.
+4. The target and its partitions are not mounted directly or through a block
+   mapping or `/dev/disk` alias, are not active swap, and have no sysfs holders.
 5. `destructive_install_enabled=true` is present in that node's local inventory.
 
 Only after all five checks pass does the gate clear the first and last 64 MiB
 of the target, refresh the kernel partition table, and hand that exact device
-to Debian Installer. This removes stale GPT, RAID, and EFI signatures without
-making a standalone unrestricted disk-wipe command available on the media.
+to Debian Installer. Mount and swap sources are traced through sysfs ancestry,
+including device-mapper and multi-slave devices. This removes stale GPT, RAID,
+and EFI signatures without making a standalone unrestricted disk-wipe command
+available on the media.
 
 The image stores SHA-256 hashes of hardware identifiers, not their raw values.
 The role, address, and network settings are not secret.

@@ -13,8 +13,9 @@ The source defect was that `/dev/mapper/Ventoy` was not resolved through its
 sysfs slave and partition ancestry. The prior simulation used the mapper name
 without modeling that ancestry and therefore could not detect the defect. The
 gate now resolves the physical parent, rejects unresolved mapper ancestry and
-all USB-backed candidates, rejects mounted targets, and clears stale disk-edge
-signatures only after every target check passes.
+all USB-backed candidates, rejects direct or indirect mounts, active swap, and
+block-device holders, and clears stale disk-edge signatures only after every
+target check passes.
 
 The affected USB is not recoverable as installation media without a complete
 rebuild. Source simulation cannot close this finding: a newly built ISO and USB

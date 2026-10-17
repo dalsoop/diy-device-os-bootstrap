@@ -79,6 +79,16 @@ Response: inspect the reported mismatch from a trusted live environment.
 Recapture inventory only when hardware was intentionally changed. Never edit a
 hash merely to make the gate pass.
 
+Symptom: the expected target is rejected as active even though `/dev/sda` is
+not listed directly in `/proc/mounts`.
+
+Cause: a target partition can be mounted or used as swap through a
+device-mapper node or `/dev/disk` alias, or retained by an unmounted holder.
+
+Response: inspect `/proc/mounts`, `/proc/swaps`, and the target's sysfs holder
+directories. Deactivate the legitimate consumer; never bypass the ancestry or
+holder check.
+
 Symptom: `mkfs.fat` prints CP850 conversion messages during EFI formatting.
 
 Cause: a minimal installer environment can lack optional iconv conversion

@@ -7,10 +7,12 @@ media_dir=${DNS_INSTALLER_MEDIA_DIR:-/cdrom/simple-cdd}
 state_dir=${DNS_INSTALLER_STATE_DIR:-/run/dns-appliance}
 sys_root=${DNS_INSTALLER_SYS_ROOT:-/sys}
 mounts_file=${DNS_INSTALLER_MOUNTS_FILE:-/proc/mounts}
+swaps_file=${DNS_INSTALLER_SWAPS_FILE:-/proc/swaps}
 debconf_set_command=${DNS_INSTALLER_DEBCONF_SET:-debconf-set}
 device_root=${DNS_INSTALLER_DEVICE_ROOT:-/dev}
 zero_command=${DNS_INSTALLER_ZERO_COMMAND:-dd}
 blockdev_command=${DNS_INSTALLER_BLOCKDEV_COMMAND:-blockdev}
+sync_command=${DNS_INSTALLER_SYNC_COMMAND:-sync}
 state_file=$state_dir/install.env
 
 fail() {
@@ -226,14 +228,19 @@ block_name_from_source() {
         /dev/*)
             block_name=${source#/dev/}
             case "$block_name" in
-                */*) fail "unsupported installer-media source $source" ;;
+                */*)
+                    source_path=$device_root/$block_name
+                    resolved_source=$(readlink -f "$source_path" 2>/dev/null) ||
+                        fail "cannot resolve device source $source"
+                    block_name=${resolved_source##*/}
+                    ;;
             esac
             [ -e "$sys_root/class/block/$block_name" ] ||
-                fail "installer-media block device $block_name is unresolved"
+                fail "block device $block_name from $source is unresolved"
             printf '%s\n' "$block_name"
             ;;
         *)
-            fail "unsupported /cdrom source $source"
+            fail "unsupported device source $source"
             ;;
     esac
 }
@@ -274,7 +281,7 @@ physical_parent_disk() {
 
         case "$block_name" in
             loop*|dm-*|md*)
-                fail "installer-media block device $block_name has no resolvable physical parent"
+                fail "block device $block_name has no resolvable physical parent"
                 ;;
         esac
         printf '%s\n' "$block_name"
@@ -301,15 +308,90 @@ disk_is_usb_backed() {
     esac
 }
 
-assert_target_unmounted() {
+block_reaches_disk() (
+    block_name=$1
+    target_disk=$2
+    visited=${3:-}
+
+    case " $visited " in
+        *" $block_name "*) fail "block-device ancestry loop at $block_name" ;;
+    esac
+    [ -e "$sys_root/class/block/$block_name" ] ||
+        fail "cannot resolve block device $block_name"
+    [ "$block_name" != "$target_disk" ] || return 0
+
+    block_path=$sys_root/class/block/$block_name
+    if [ -e "$block_path/partition" ]; then
+        resolved_path=$(physical_path "$block_path") ||
+            fail "cannot resolve partition parent for $block_name"
+        parent_name=$(basename "$(dirname "$resolved_path")")
+        [ "$parent_name" != "$block_name" ] ||
+            fail "partition parent loop for $block_name"
+        if block_reaches_disk "$parent_name" "$target_disk" "$visited $block_name"; then
+            return 0
+        fi
+        return 1
+    fi
+
+    for slave_path in "$block_path"/slaves/*; do
+        [ -e "$slave_path" ] || continue
+        slave_name=${slave_path##*/}
+        if block_reaches_disk "$slave_name" "$target_disk" "$visited $block_name"; then
+            return 0
+        fi
+    done
+    return 1
+)
+
+assert_source_not_on_target() {
+    source=$1
+    disk=$2
+    case "$source" in
+        /dev/*) ;;
+        *) return 0 ;;
+    esac
+    block_name=$(block_name_from_source "$source")
+    if block_reaches_disk "$block_name" "$disk"; then
+        fail "target disk $disk is active through $source"
+    fi
+}
+
+assert_target_has_no_holders() {
+    disk=$1
+    for block_path in "$sys_root"/class/block/*; do
+        block_name=${block_path##*/}
+        is_target_component=false
+        if [ "$block_name" = "$disk" ]; then
+            is_target_component=true
+        elif [ -e "$block_path/partition" ]; then
+            resolved_path=$(physical_path "$block_path") ||
+                fail "cannot resolve partition parent for $block_name"
+            parent_name=$(basename "$(dirname "$resolved_path")")
+            [ "$parent_name" = "$disk" ] && is_target_component=true
+        fi
+        [ "$is_target_component" = true ] || continue
+        for holder_path in "$block_path"/holders/*; do
+            [ -e "$holder_path" ] || continue
+            fail "target component $block_name is held by ${holder_path##*/}"
+        done
+    done
+}
+
+assert_target_inactive() {
     disk=$1
     while IFS=' ' read -r source _rest; do
-        case "$source" in
-            "/dev/$disk"|"/dev/$disk"[0-9]*|"/dev/$disk"p[0-9]*)
-                fail "target disk $disk has a mounted filesystem"
-                ;;
-        esac
+        assert_source_not_on_target "$source" "$disk"
     done < "$mounts_file"
+
+    [ -r "$swaps_file" ] || fail "cannot read swap table $swaps_file"
+    while IFS=' ' read -r source _rest; do
+        case "$source" in
+            Filename|'') continue ;;
+        esac
+        assert_source_not_on_target "$source" "$disk"
+    done < "$swaps_file"
+
+    assert_target_has_no_holders "$disk"
 }
 
 prepare_target_disk() {
@@ -318,7 +400,7 @@ prepare_target_disk() {
     edge_sectors=131072
     [ "$sectors" -gt $((edge_sectors * 2)) ] ||
         fail "target disk $disk is too small for guarded preparation"
-    assert_target_unmounted "$disk"
+    assert_target_inactive "$disk"
 
     target=$device_root/$disk
     if [ "$device_root" = /dev ]; then
@@ -326,13 +408,14 @@ prepare_target_disk() {
     fi
     command -v "$zero_command" >/dev/null 2>&1 || fail "$zero_command is required"
     command -v "$blockdev_command" >/dev/null 2>&1 || fail "$blockdev_command is required"
+    command -v "$sync_command" >/dev/null 2>&1 || fail "$sync_command is required"
 
     "$zero_command" if=/dev/zero of="$target" bs=512 count="$edge_sectors" ||
         fail "cannot clear leading signatures from $target"
     "$zero_command" if=/dev/zero of="$target" bs=512 \
         seek=$((sectors - edge_sectors)) count="$edge_sectors" ||
         fail "cannot clear trailing signatures from $target"
-    sync
+    "$sync_command" || fail "cannot synchronize target preparation"
     "$blockdev_command" --rereadpt "$target" ||
         fail "cannot refresh the partition table for $target"
 }

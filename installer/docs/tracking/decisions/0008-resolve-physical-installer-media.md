@@ -24,8 +24,12 @@ USB-backed is rejected even when it reports `removable=0`.
 
 After one role and one internal disk pass hardware identity, reinstall
 authorization, installer-media exclusion, transport, ambiguity, size, and
-mount checks, the gate clears the first and last 64 MiB of that exact disk and
-refreshes its partition table. Debian Installer then owns partition creation.
+activity checks, the gate clears the first and last 64 MiB of that exact disk
+and refreshes its partition table. Activity checks resolve mounted filesystems
+and active swap through partitions, `/dev/mapper`, `/dev/disk` aliases, and
+multi-slave ancestry. They also reject a target or target partition with a
+sysfs holder, even when that holder is not mounted. Debian Installer then owns
+partition creation.
 The preseed uses the documented
 `partman-partitioning/confirm_write_new_label` key.
 

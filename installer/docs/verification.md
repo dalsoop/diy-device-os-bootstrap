@@ -7,9 +7,10 @@ evidence.
 
 ## Automated source gates
 
-- `tests/install-gate-simulation.sh` passes all 17 cases, including direct
-  partition media, Ventoy's `/dev/mapper/Ventoy` ancestry, unresolved mappers,
-  fixed-bit USB targets, mounted targets, and zero writes on every rejection.
+- `tests/install-gate-simulation.sh` passes all 26 cases, including direct
+  partition media, Ventoy's `/dev/mapper/Ventoy` ancestry, ambiguous and cyclic
+  ancestry, fixed-bit USB targets, direct and indirect mounts, active swap,
+  holders, and zero writes on every rejection.
 - `tests/management-simulation.sh` passes all 6 cases, including explicit
   offline Internet state in the JSON preflight contract.
 - `tests/tailscale-enrollment-simulation.sh` passes without printing either
