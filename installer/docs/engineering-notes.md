@@ -79,6 +79,28 @@ Response: inspect the reported mismatch from a trusted live environment.
 Recapture inventory only when hardware was intentionally changed. Never edit a
 hash merely to make the gate pass.
 
+Symptom: the expected target is rejected as active even though `/dev/sda` is
+not listed directly in `/proc/mounts`.
+
+Cause: a target partition can be mounted or used as swap through a
+device-mapper node or `/dev/disk` alias, or retained by an unmounted holder.
+
+Response: inspect `/proc/mounts`, `/proc/swaps`, and the target's sysfs holder
+directories. Deactivate the legitimate consumer; never bypass the ancestry or
+holder check.
+
+Symptom: `mkfs.fat` prints CP850 conversion messages during EFI formatting.
+
+Cause: a minimal installer environment can lack optional iconv conversion
+modules. `mkfs.fat` then reports that it is using its internal CP850 table; that
+message alone is non-fatal. It does not prove that a FAT filesystem was written.
+
+Response: inspect the command exit status and the EFI filesystem separately.
+If the installer USB itself now has the DNS target layout, stop immediately:
+the USB was selected as the target, and formatting retries are unsafe. Preserve
+the media for inspection, rebuild from a fixed revision, and repeat the
+disposable-media and physical gates.
+
 Symptom: first boot retries and appears to reuse credentials.
 
 Cause: credentials are intentionally generated once and retained until

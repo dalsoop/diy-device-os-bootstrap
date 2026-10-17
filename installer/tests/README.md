@@ -3,15 +3,21 @@
 `install-gate-simulation.sh` runs the destructive-selection gate against an
 isolated fake sysfs tree. It never opens a real block device.
 
-The 13-case simulation covers:
+The 26-case simulation covers:
 
 - one exact HP/NIC/disk match selecting `/dev/sda`;
 - wrong DMI identity stopping before selection;
 - an erase-disabled role stopping before selection;
 - two matching internal disks stopping as ambiguous;
 - an additional non-matching disk being ignored;
-- an undersized or removable target being rejected;
-- the installer media never being selected as the target;
+- an undersized, removable, or USB-transport target being rejected;
+- direct and Ventoy-mapped installer media resolving to their physical parent;
+- the Ventoy backing disk never being selected as the target;
+- unresolved, ambiguous, multi-slave, cyclic, loop, and MD installer ancestry
+  failing closed;
+- direct, mapper-backed, and `/dev/disk/by-uuid` mounted targets being rejected;
+- active swap and unmounted sysfs holders on the target being rejected;
+- leading and trailing signature clearing occurring only after acceptance;
 - two interfaces with the expected MAC stopping as ambiguous;
 - a completed role being blocked without a reinstall token;
 - a matching generation-bound reinstall token being accepted;

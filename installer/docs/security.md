@@ -46,8 +46,10 @@ sufficient capacity, and the exact phrase `ERASE <device> <serial>`.
 The DNS installer accepts only one enabled role whose HP product identity,
 serial/UUID, NIC MAC, disk model, disk serial, and minimum size all match.
 Installer media, removable disks, an unresolved device, or multiple candidates
-must fail before partitioning. A completed role also needs a token bound to its
-current generation and system UUID hash.
+must fail before partitioning. A matching target that is mounted directly or
+through block ancestry, used as swap, or held by another block device also
+fails before any signature is cleared. A completed role also needs a token
+bound to its current generation and system UUID hash.
 
 Restore requires the exact target URL in `RESTORE <url>`. DNS apply requires
 literal `APPLY`, a caller-supplied commit equal to `HEAD`, and a clean zone
