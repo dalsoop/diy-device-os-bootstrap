@@ -7,7 +7,12 @@ media_dir=${DNS_INSTALLER_MEDIA_DIR:-/cdrom/simple-cdd}
 state_dir=${DNS_INSTALLER_STATE_DIR:-/run/dns-appliance}
 sys_root=${DNS_INSTALLER_SYS_ROOT:-/sys}
 mounts_file=${DNS_INSTALLER_MOUNTS_FILE:-/proc/mounts}
+swaps_file=${DNS_INSTALLER_SWAPS_FILE:-/proc/swaps}
 debconf_set_command=${DNS_INSTALLER_DEBCONF_SET:-debconf-set}
+device_root=${DNS_INSTALLER_DEVICE_ROOT:-/dev}
+zero_command=${DNS_INSTALLER_ZERO_COMMAND:-dd}
+blockdev_command=${DNS_INSTALLER_BLOCKDEV_COMMAND:-blockdev}
+sync_command=${DNS_INSTALLER_SYNC_COMMAND:-sync}
 state_file=$state_dir/install.env
 
 fail() {
@@ -199,22 +204,226 @@ check_reinstall_permission() {
     [ "$mounted_enrollment" = false ] || umount "$enrollment_dir"
 }
 
+physical_path() {
+    CDPATH='' cd -P "$1" 2>/dev/null && pwd
+}
+
+block_name_from_source() {
+    source=$1
+    case "$source" in
+        /dev/mapper/*)
+            mapper_name=${source#/dev/mapper/}
+            mapper_matches=0
+            block_name=
+            for mapper_path in "$sys_root"/class/block/dm-*; do
+                [ -r "$mapper_path/dm/name" ] || continue
+                [ "$(read_first_line "$mapper_path/dm/name")" = "$mapper_name" ] || continue
+                mapper_matches=$((mapper_matches + 1))
+                block_name=${mapper_path##*/}
+            done
+            [ "$mapper_matches" -eq 1 ] ||
+                fail "installer mapper $mapper_name resolved to $mapper_matches block devices"
+            printf '%s\n' "$block_name"
+            ;;
+        /dev/*)
+            block_name=${source#/dev/}
+            case "$block_name" in
+                */*)
+                    source_path=$device_root/$block_name
+                    resolved_source=$(readlink -f "$source_path" 2>/dev/null) ||
+                        fail "cannot resolve device source $source"
+                    block_name=${resolved_source##*/}
+                    ;;
+            esac
+            [ -e "$sys_root/class/block/$block_name" ] ||
+                fail "block device $block_name from $source is unresolved"
+            printf '%s\n' "$block_name"
+            ;;
+        *)
+            fail "unsupported device source $source"
+            ;;
+    esac
+}
+
+physical_parent_disk() {
+    block_name=$1
+    depth=0
+
+    while [ "$depth" -lt 16 ]; do
+        block_path=$sys_root/class/block/$block_name
+        [ -e "$block_path" ] || fail "cannot resolve block device $block_name"
+
+        if [ -e "$block_path/partition" ]; then
+            resolved_path=$(physical_path "$block_path") ||
+                fail "cannot resolve partition parent for $block_name"
+            parent_name=$(basename "$(dirname "$resolved_path")")
+            [ "$parent_name" != "$block_name" ] ||
+                fail "partition parent loop for $block_name"
+            block_name=$parent_name
+            depth=$((depth + 1))
+            continue
+        fi
+
+        slave_count=0
+        slave_name=
+        for slave_path in "$block_path"/slaves/*; do
+            [ -e "$slave_path" ] || continue
+            slave_count=$((slave_count + 1))
+            slave_name=${slave_path##*/}
+        done
+        if [ "$slave_count" -gt 0 ]; then
+            [ "$slave_count" -eq 1 ] ||
+                fail "$block_name has $slave_count backing devices; expected exactly one"
+            block_name=$slave_name
+            depth=$((depth + 1))
+            continue
+        fi
+
+        case "$block_name" in
+            loop*|dm-*|md*)
+                fail "block device $block_name has no resolvable physical parent"
+                ;;
+        esac
+        printf '%s\n' "$block_name"
+        return 0
+    done
+
+    fail "block-device ancestry exceeded the safety limit"
+}
+
 boot_parent_disk() {
     source=$(awk '$2 == "/cdrom" { print $1; exit }' "$mounts_file")
+    [ -n "$source" ] || fail "/cdrom mount source is missing"
+    block_name=$(block_name_from_source "$source")
+    physical_parent_disk "$block_name"
+}
+
+disk_is_usb_backed() {
+    disk=$1
+    device_path=$(physical_path "$sys_root/class/block/$disk/device") ||
+        fail "cannot resolve transport for candidate disk $disk"
+    case "$device_path" in
+        */usb*/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+block_reaches_disk() (
+    block_name=$1
+    target_disk=$2
+    visited=${3:-}
+
+    case " $visited " in
+        *" $block_name "*) fail "block-device ancestry loop at $block_name" ;;
+    esac
+    [ -e "$sys_root/class/block/$block_name" ] ||
+        fail "cannot resolve block device $block_name"
+    [ "$block_name" != "$target_disk" ] || return 0
+
+    block_path=$sys_root/class/block/$block_name
+    if [ -e "$block_path/partition" ]; then
+        resolved_path=$(physical_path "$block_path") ||
+            fail "cannot resolve partition parent for $block_name"
+        parent_name=$(basename "$(dirname "$resolved_path")")
+        [ "$parent_name" != "$block_name" ] ||
+            fail "partition parent loop for $block_name"
+        if block_reaches_disk "$parent_name" "$target_disk" "$visited $block_name"; then
+            return 0
+        fi
+        return 1
+    fi
+
+    for slave_path in "$block_path"/slaves/*; do
+        [ -e "$slave_path" ] || continue
+        slave_name=${slave_path##*/}
+        if block_reaches_disk "$slave_name" "$target_disk" "$visited $block_name"; then
+            return 0
+        fi
+    done
+    return 1
+)
+
+assert_source_not_on_target() {
+    source=$1
+    disk=$2
     case "$source" in
         /dev/*) ;;
         *) return 0 ;;
     esac
-    name=${source#/dev/}
-    while [ -e "$sys_root/class/block/$name/partition" ]; do
-        name=$(basename "$(readlink -f "$sys_root/class/block/$name/..")")
+    block_name=$(block_name_from_source "$source")
+    if block_reaches_disk "$block_name" "$disk"; then
+        fail "target disk $disk is active through $source"
+    fi
+}
+
+assert_target_has_no_holders() {
+    disk=$1
+    for block_path in "$sys_root"/class/block/*; do
+        block_name=${block_path##*/}
+        is_target_component=false
+        if [ "$block_name" = "$disk" ]; then
+            is_target_component=true
+        elif [ -e "$block_path/partition" ]; then
+            resolved_path=$(physical_path "$block_path") ||
+                fail "cannot resolve partition parent for $block_name"
+            parent_name=$(basename "$(dirname "$resolved_path")")
+            [ "$parent_name" = "$disk" ] && is_target_component=true
+        fi
+        [ "$is_target_component" = true ] || continue
+        for holder_path in "$block_path"/holders/*; do
+            [ -e "$holder_path" ] || continue
+            fail "target component $block_name is held by ${holder_path##*/}"
+        done
     done
-    printf '%s\n' "$name"
+}
+
+assert_target_inactive() {
+    disk=$1
+    while IFS=' ' read -r source _rest; do
+        assert_source_not_on_target "$source" "$disk"
+    done < "$mounts_file"
+
+    [ -r "$swaps_file" ] || fail "cannot read swap table $swaps_file"
+    while IFS=' ' read -r source _rest; do
+        case "$source" in
+            Filename|'') continue ;;
+        esac
+        assert_source_not_on_target "$source" "$disk"
+    done < "$swaps_file"
+
+    assert_target_has_no_holders "$disk"
+}
+
+prepare_target_disk() {
+    disk=$1
+    sectors=$2
+    edge_sectors=131072
+    [ "$sectors" -gt $((edge_sectors * 2)) ] ||
+        fail "target disk $disk is too small for guarded preparation"
+    assert_target_inactive "$disk"
+
+    target=$device_root/$disk
+    if [ "$device_root" = /dev ]; then
+        [ -b "$target" ] || fail "target $target is not a block device"
+    fi
+    command -v "$zero_command" >/dev/null 2>&1 || fail "$zero_command is required"
+    command -v "$blockdev_command" >/dev/null 2>&1 || fail "$blockdev_command is required"
+    command -v "$sync_command" >/dev/null 2>&1 || fail "$sync_command is required"
+
+    "$zero_command" if=/dev/zero of="$target" bs=512 count="$edge_sectors" ||
+        fail "cannot clear leading signatures from $target"
+    "$zero_command" if=/dev/zero of="$target" bs=512 \
+        seek=$((sectors - edge_sectors)) count="$edge_sectors" ||
+        fail "cannot clear trailing signatures from $target"
+    "$sync_command" || fail "cannot synchronize target preparation"
+    "$blockdev_command" --rereadpt "$target" ||
+        fail "cannot refresh the partition table for $target"
 }
 
 match_disk() {
     disk_matches=0
     matched_disk=
+    matched_sectors=
     media_disk=$(boot_parent_disk)
 
     for disk_path in "$sys_root"/class/block/*; do
@@ -227,6 +436,7 @@ match_disk() {
         [ "$disk" != "$media_disk" ] || continue
         [ -r "$disk_path/device/model" ] || continue
         [ -r "$disk_path/device/serial" ] || continue
+        disk_is_usb_backed "$disk" && continue
 
         model_hash=$(hash_value "$(read_first_line "$disk_path/device/model")")
         serial_hash=$(hash_value "$(read_first_line "$disk_path/device/serial")")
@@ -242,14 +452,17 @@ match_disk() {
 
         disk_matches=$((disk_matches + 1))
         matched_disk=/dev/$disk
+        matched_sectors=$sectors
     done
 
     [ "$disk_matches" -eq 1 ] || fail "disk matched $disk_matches targets; expected exactly one"
     matched_name=${matched_disk#/dev/}
+    prepare_target_disk "$matched_name" "$matched_sectors"
     {
         printf 'TARGET_DISK=%s\n' "$matched_disk"
         printf 'TARGET_DISK_MODEL=%s\n' "$(read_first_line "$sys_root/class/block/$matched_name/device/model")"
         printf 'TARGET_DISK_SERIAL=%s\n' "$(read_first_line "$sys_root/class/block/$matched_name/device/serial")"
+        printf 'TARGET_DISK_PREPARED=true\n'
     } >> "$state_file"
     set_debconf partman-auto/disk "$matched_disk"
 }

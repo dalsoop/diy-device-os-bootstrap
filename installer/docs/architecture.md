@@ -104,7 +104,11 @@ plaintext enrollment evidence and age-encrypted recovery secrets.
 
 The boot menu has no destructive timeout. After a deliberate DNS installer
 selection, `install-gate` must resolve exactly one inventory role and exactly
-one non-removable internal disk before partitioning.
+one non-removable, non-USB internal disk before partitioning. It resolves the
+`/cdrom` source through partition and device-mapper ancestry to the physical
+installer disk, rejects unresolved ancestry, and resolves every mounted or swap
+device back to candidate disks. It also rejects target holders and clears stale
+signatures only after the target passes every identity and authorization gate.
 
 ### Appliance plane
 

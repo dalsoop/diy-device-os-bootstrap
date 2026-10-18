@@ -21,7 +21,21 @@ cat > "$test_root/bin/debconf-set" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "${DNS_TEST_DEBCONF_LOG:?}"
 EOF
-chmod 0755 "$test_root/bin/sha256sum" "$test_root/bin/debconf-set"
+cat > "$test_root/bin/dns-test-dd" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "${DNS_TEST_DISK_LOG:?}"
+EOF
+cat > "$test_root/bin/dns-test-blockdev" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "${DNS_TEST_BLOCKDEV_LOG:?}"
+EOF
+cat > "$test_root/bin/dns-test-sync" <<'EOF'
+#!/bin/sh
+printf 'sync\n' >> "${DNS_TEST_SYNC_LOG:?}"
+EOF
+chmod 0755 "$test_root/bin/sha256sum" "$test_root/bin/debconf-set" \
+    "$test_root/bin/dns-test-dd" "$test_root/bin/dns-test-blockdev" \
+    "$test_root/bin/dns-test-sync"
 
 normalize() {
     LC_ALL=C tr '[:lower:]' '[:upper:]' |
@@ -43,17 +57,47 @@ make_disk() {
     model=$4
     serial=$5
     sectors=$6
-    mkdir -p "$root/sys/class/block/$disk/device"
+    transport=${7:-internal}
+    case "$transport" in
+        internal) device_path=$root/sys/devices/pci0000:00/ata1/block/$disk ;;
+        usb) device_path=$root/sys/devices/pci0000:00/usb1/1-1/block/$disk ;;
+        *) echo "unknown test transport: $transport" >&2; exit 1 ;;
+    esac
+    mkdir -p "$root/sys/class/block" "$device_path/device"
+    rm -f "$root/sys/class/block/$disk"
+    ln -s "$device_path" "$root/sys/class/block/$disk"
     printf '%s\n' "$removable" > "$root/sys/class/block/$disk/removable"
     printf '%s\n' "$model" > "$root/sys/class/block/$disk/device/model"
     printf '%s\n' "$serial" > "$root/sys/class/block/$disk/device/serial"
     printf '%s\n' "$sectors" > "$root/sys/class/block/$disk/size"
 }
 
+make_partition() {
+    root=$1
+    disk=$2
+    partition=$3
+    disk_path=$(CDPATH='' cd -P "$root/sys/class/block/$disk" && pwd)
+    mkdir -p "$disk_path/$partition"
+    printf '1\n' > "$disk_path/$partition/partition"
+    ln -s "$disk_path/$partition" "$root/sys/class/block/$partition"
+}
+
+make_mapper() {
+    root=$1
+    mapper=$2
+    mapper_name=$3
+    slave=$4
+    mkdir -p "$root/sys/class/block/$mapper/dm" \
+        "$root/sys/class/block/$mapper/slaves"
+    printf '%s\n' "$mapper_name" > "$root/sys/class/block/$mapper/dm/name"
+    ln -s "$root/sys/class/block/$slave" \
+        "$root/sys/class/block/$mapper/slaves/$slave"
+}
+
 make_fixture() {
     name=$1
     root=$test_root/$name
-    mkdir -p "$root/media" "$root/run" "$root/enrollment" \
+    mkdir -p "$root/media" "$root/run" "$root/enrollment" "$root/dev" \
         "$root/sys/class/dmi/id" "$root/sys/class/net/en0"
 
     printf 'HP ProDesk Test\n' > "$root/sys/class/dmi/id/product_name"
@@ -62,9 +106,11 @@ make_fixture() {
     printf '11111111-2222-3333-4444-555555555555\n' > "$root/sys/class/dmi/id/product_uuid"
     printf '00:11:22:33:44:55\n' > "$root/sys/class/net/en0/address"
 
-    make_disk "$root" sda 0 'TEST SSD' 'TEST-DISK-01' 2097152
-    make_disk "$root" sdb 1 'TEST USB' 'TEST-USB-01' 4194304
-    printf '/dev/sdb /cdrom iso9660 ro 0 0\n' > "$root/mounts"
+    make_disk "$root" sda 0 'TEST SSD' 'TEST-DISK-01' 2097152 internal
+    make_disk "$root" sdb 1 'TEST USB' 'TEST-USB-01' 4194304 usb
+    make_partition "$root" sdb sdb1
+    printf '/dev/sdb1 /cdrom iso9660 ro 0 0\n' > "$root/mounts"
+    printf 'Filename Type Size Used Priority\n' > "$root/swaps"
 
     cat > "$root/media/dns01.conf" <<EOF
 role=dns01
@@ -99,9 +145,17 @@ run_gate() {
     DNS_INSTALLER_STATE_DIR="$root/run" \
     DNS_INSTALLER_SYS_ROOT="$root/sys" \
     DNS_INSTALLER_MOUNTS_FILE="$root/mounts" \
+    DNS_INSTALLER_SWAPS_FILE="$root/swaps" \
     DNS_INSTALLER_DEBCONF_SET="$test_root/bin/debconf-set" \
     DNS_INSTALLER_ENROLLMENT_DIR="$root/enrollment" \
+    DNS_INSTALLER_DEVICE_ROOT="$root/dev" \
+    DNS_INSTALLER_ZERO_COMMAND="$test_root/bin/dns-test-dd" \
+    DNS_INSTALLER_BLOCKDEV_COMMAND="$test_root/bin/dns-test-blockdev" \
+    DNS_INSTALLER_SYNC_COMMAND="$test_root/bin/dns-test-sync" \
     DNS_TEST_DEBCONF_LOG="$root/debconf.log" \
+    DNS_TEST_DISK_LOG="$root/disk.log" \
+    DNS_TEST_BLOCKDEV_LOG="$root/blockdev.log" \
+    DNS_TEST_SYNC_LOG="$root/sync.log" \
     PATH="$test_root/bin:$PATH" \
         /bin/sh "$gate" "$phase"
 }
@@ -113,8 +167,14 @@ expect_success() {
         grep -q '^TARGET_DISK=/dev/sda$' "$root/run/install.env" &&
         grep -q '^TARGET_DISK_MODEL=TEST SSD$' "$root/run/install.env" &&
         grep -q '^TARGET_DISK_SERIAL=TEST-DISK-01$' "$root/run/install.env" &&
+        grep -q '^TARGET_DISK_PREPARED=true$' "$root/run/install.env" &&
         grep -q '^NIC_MAC=00:11:22:33:44:55$' "$root/run/install.env" &&
-        grep -q '^partman-auto/disk /dev/sda$' "$root/debconf.log"; then
+        grep -q '^partman-auto/disk /dev/sda$' "$root/debconf.log" &&
+        [ "$(wc -l < "$root/disk.log" | tr -d ' ')" -eq 2 ] &&
+        grep -q "of=$root/dev/sda bs=512 count=131072" "$root/disk.log" &&
+        grep -q "of=$root/dev/sda bs=512 seek=1966080 count=131072" "$root/disk.log" &&
+        grep -q '^sync$' "$root/sync.log" &&
+        grep -q "^--rereadpt $root/dev/sda$" "$root/blockdev.log"; then
         printf 'PASS %s\n' "$name"
     else
         printf 'FAIL %s\n' "$name" >&2
@@ -128,6 +188,10 @@ expect_failure() {
     root=$2
     if run_gate "$root" select-disk > "$root/output.log" 2>&1; then
         printf 'FAIL %s unexpectedly succeeded\n' "$name" >&2
+        exit 1
+    fi
+    if [ -s "$root/disk.log" ]; then
+        printf 'FAIL %s wrote target bytes before rejection\n' "$name" >&2
         exit 1
     fi
     printf 'PASS %s\n' "$name"
@@ -162,13 +226,91 @@ root=$(make_fixture removable-target)
 printf '1\n' > "$root/sys/class/block/sda/removable"
 expect_failure removable_target_is_blocked "$root"
 
+root=$(make_fixture fixed-usb-target)
+make_disk "$root" sda 0 'TEST SSD' 'TEST-DISK-01' 2097152 usb
+expect_failure usb_transport_target_is_blocked "$root"
+
 root=$(make_fixture installer-media)
-printf '/dev/sda /cdrom iso9660 ro 0 0\n' > "$root/mounts"
+make_partition "$root" sda sda1
+printf '/dev/sda1 /cdrom iso9660 ro 0 0\n' > "$root/mounts"
 expect_failure installer_media_is_never_targeted "$root"
 
 root=$(make_fixture ventoy-mapper-media)
+make_mapper "$root" dm-0 Ventoy sdb1
 printf '/dev/mapper/Ventoy /cdrom iso9660 ro 0 0\n' > "$root/mounts"
 expect_success ventoy_mapper_media_keeps_exact_target_selection "$root"
+
+root=$(make_fixture ventoy-mapper-on-target)
+make_partition "$root" sda sda1
+make_mapper "$root" dm-0 Ventoy sda1
+printf '/dev/mapper/Ventoy /cdrom iso9660 ro 0 0\n' > "$root/mounts"
+expect_failure ventoy_mapper_backing_disk_is_never_targeted "$root"
+
+root=$(make_fixture unresolved-ventoy-mapper)
+printf '/dev/mapper/Ventoy /cdrom iso9660 ro 0 0\n' > "$root/mounts"
+expect_failure unresolved_ventoy_mapper_fails_closed "$root"
+
+root=$(make_fixture ambiguous-ventoy-mapper)
+make_mapper "$root" dm-0 Ventoy sdb1
+make_mapper "$root" dm-1 Ventoy sdb1
+printf '/dev/mapper/Ventoy /cdrom iso9660 ro 0 0\n' > "$root/mounts"
+expect_failure ambiguous_ventoy_mapper_fails_closed "$root"
+
+root=$(make_fixture multi-slave-ventoy-mapper)
+make_partition "$root" sda sda1
+make_mapper "$root" dm-0 Ventoy sdb1
+ln -s "$root/sys/class/block/sda1" \
+    "$root/sys/class/block/dm-0/slaves/sda1"
+printf '/dev/mapper/Ventoy /cdrom iso9660 ro 0 0\n' > "$root/mounts"
+expect_failure multi_slave_installer_media_fails_closed "$root"
+
+root=$(make_fixture loop-installer-media)
+mkdir -p "$root/sys/class/block/loop0"
+printf '/dev/loop0 /cdrom iso9660 ro 0 0\n' > "$root/mounts"
+expect_failure loop_installer_media_fails_closed "$root"
+
+root=$(make_fixture md-installer-media)
+mkdir -p "$root/sys/class/block/md0"
+printf '/dev/md0 /cdrom iso9660 ro 0 0\n' > "$root/mounts"
+expect_failure md_installer_media_fails_closed "$root"
+
+root=$(make_fixture cyclic-installer-mapper)
+make_mapper "$root" dm-0 Ventoy dm-1
+make_mapper "$root" dm-1 Other dm-0
+printf '/dev/mapper/Ventoy /cdrom iso9660 ro 0 0\n' > "$root/mounts"
+expect_failure cyclic_installer_ancestry_fails_closed "$root"
+
+root=$(make_fixture mounted-target)
+make_partition "$root" sda sda2
+printf '/dev/sdb1 /cdrom iso9660 ro 0 0\n/dev/sda2 /target ext4 rw 0 0\n' > "$root/mounts"
+expect_failure mounted_target_is_blocked "$root"
+
+root=$(make_fixture mapper-mounted-target)
+make_partition "$root" sda sda2
+make_mapper "$root" dm-1 crypt-root sda2
+printf '/dev/sdb1 /cdrom iso9660 ro 0 0\n/dev/mapper/crypt-root /target ext4 rw 0 0\n' > "$root/mounts"
+expect_failure mapper_mounted_target_is_blocked "$root"
+
+root=$(make_fixture by-uuid-mounted-target)
+make_partition "$root" sda sda2
+mkdir -p "$root/dev/disk/by-uuid"
+ln -s "$root/sys/class/block/sda2" "$root/dev/sda2"
+ln -s ../../sda2 "$root/dev/disk/by-uuid/test-root"
+printf '/dev/sdb1 /cdrom iso9660 ro 0 0\n/dev/disk/by-uuid/test-root /target ext4 rw 0 0\n' > "$root/mounts"
+expect_failure by_uuid_mounted_target_is_blocked "$root"
+
+root=$(make_fixture active-swap-target)
+make_partition "$root" sda sda3
+printf '/dev/sda3 partition 1048572 0 -2\n' >> "$root/swaps"
+expect_failure active_swap_target_is_blocked "$root"
+
+root=$(make_fixture held-target)
+make_partition "$root" sda sda2
+make_mapper "$root" dm-1 crypt-root sda2
+mkdir -p "$root/sys/class/block/sda2/holders"
+ln -s "$root/sys/class/block/dm-1" \
+    "$root/sys/class/block/sda2/holders/dm-1"
+expect_failure held_target_is_blocked "$root"
 
 root=$(make_fixture duplicate-mac)
 mkdir -p "$root/sys/class/net/en1"
@@ -202,4 +344,4 @@ authorize_erase=true
 EOF
 expect_failure stale_reinstall_token_is_blocked "$root"
 
-printf 'RESULT 13/13 install-gate simulations passed\n'
+printf 'RESULT 26/26 install-gate simulations passed\n'
