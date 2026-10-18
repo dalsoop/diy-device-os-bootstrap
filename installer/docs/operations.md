@@ -80,11 +80,20 @@ Then copy only an operator public key and age recipient into the named input
 paths, and enable destructive installation for the current pilot role only.
 
 ```sh
-sudo apt-get install simple-cdd debian-cd debian-archive-keyring \
-  reprepro rsync xorriso isolinux syslinux-common skopeo jq curl
+sudo apt-get install debian-cd debian-archive-keyring dctrl-tools \
+  distro-info-data python3-debian reprepro rsync wget xorriso isolinux \
+  syslinux-common skopeo jq curl
 installer/installer/fetch-locked-sources
+sudo apt-get install \
+  ./installer/cache/python3-simple-cdd_0.6.10_all.deb \
+  ./installer/cache/simple-cdd_0.6.10_all.deb
 installer/installer/build-image
 ```
+
+Debian 13 ships Simple-CDD 0.6.9, which incorrectly requests the removed i386
+installer while building amd64 Trixie images. The fetched 0.6.10 packages are
+version-, snapshot-, and SHA-256-pinned and contain Debian's fix for
+[Debian bug #1111023](https://bugs.debian.org/1111023).
 
 The build must run on amd64 Debian 13. Retain the ISO, build manifest, package
 closure, checksums, and SBOM outside Git. A successful build is not permission

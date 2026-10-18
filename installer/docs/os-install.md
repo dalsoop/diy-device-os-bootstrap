@@ -74,12 +74,16 @@ age-keygen -y /secure/dns-recovery-age-key.txt \
 
 ## Build
 
-Build on an amd64 Debian 13 machine with `simple-cdd` installed:
+Build on an amd64 Debian 13 machine with the required system packages:
 
 ```sh
-sudo apt-get install simple-cdd debian-cd debian-archive-keyring \
-  reprepro rsync xorriso isolinux syslinux-common skopeo jq curl
+sudo apt-get install debian-cd debian-archive-keyring dctrl-tools \
+  distro-info-data python3-debian reprepro rsync wget xorriso isolinux \
+  syslinux-common skopeo jq curl
 installer/installer/fetch-locked-sources
+sudo apt-get install \
+  ./installer/cache/python3-simple-cdd_0.6.10_all.deb \
+  ./installer/cache/simple-cdd_0.6.10_all.deb
 installer/installer/build-image
 ```
 
@@ -89,9 +93,10 @@ disabled inventory. Build output is written under
 `installer/installer/simple-cdd/images/` and remains ignored by Git.
 
 The source lock currently selects Debian 13.7, the `20261011T000000Z` Debian
-snapshot, Simple-CDD 0.6.9, and the Technitium 15.6.1 linux/amd64 manifest
-digest, plus Tailscale 1.104.1 for linux/amd64 by SHA-256. Build evidence is
-emitted under ignored `installer/artifacts/`.
+snapshot, Simple-CDD 0.6.10 from the `20250909T150629Z` Debian snapshot, and
+the Technitium 15.6.1 linux/amd64 manifest digest, plus Tailscale 1.104.1 for
+linux/amd64 by SHA-256. Build evidence is emitted under ignored
+`installer/artifacts/`.
 
 ## Add the DNS image to the multiboot USB
 

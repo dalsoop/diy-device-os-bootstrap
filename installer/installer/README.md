@@ -2,8 +2,8 @@
 
 This directory contains the first implementation of the Debian OS installer:
 
-- `fetch-locked-sources` verifies and caches the pinned Technitium OCI image and
-  Tailscale static archive.
+- `fetch-locked-sources` verifies and caches the pinned Simple-CDD packages,
+  Technitium OCI image, and Tailscale static archive.
 - `build-image` builds an offline amd64 image and release evidence on Debian 13.
 - `write-usb-linux` writes the verified ISO and appends `DNS-ENROLL` after an
   exact destructive confirmation.

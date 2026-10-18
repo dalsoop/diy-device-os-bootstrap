@@ -18,6 +18,8 @@ artifact_dir=${DNS_APPLIANCE_ARTIFACT_DIR:-$repo_root/artifacts}
 technitium_archive=$cache_dir/technitium-dns-$TECHNITIUM_VERSION-amd64.oci.tar
 tailscale_archive=$cache_dir/tailscale-$TAILSCALE_VERSION-amd64.tgz
 tailscale_licenses=$cache_dir/tailscale-$TAILSCALE_VERSION-dependency-licenses.md
+simple_cdd_package=$cache_dir/simple-cdd_${SIMPLE_CDD_VERSION}_all.deb
+python3_simple_cdd_package=$cache_dir/python3-simple-cdd_${SIMPLE_CDD_VERSION}_all.deb
 source_repository=${DNS_APPLIANCE_SOURCE_REPOSITORY:-https://github.com/dalsoop/diy-device-os-bootstrap}
 
 fail() {
@@ -62,6 +64,14 @@ case "$installed_simple_cdd" in
     "$SIMPLE_CDD_VERSION"|"$SIMPLE_CDD_VERSION"+*) ;;
     *) fail "simple-cdd $SIMPLE_CDD_VERSION required; found ${installed_simple_cdd:-missing}" ;;
 esac
+[ -s "$simple_cdd_package" ] ||
+    fail "missing pinned Simple-CDD package; run installer/fetch-locked-sources"
+printf '%s  %s\n' "$SIMPLE_CDD_PACKAGE_SHA256" "$simple_cdd_package" |
+    sha256sum -c - >/dev/null || fail "Simple-CDD package SHA-256 mismatch"
+[ -s "$python3_simple_cdd_package" ] ||
+    fail "missing pinned python3-simple-cdd package; run installer/fetch-locked-sources"
+printf '%s  %s\n' "$PYTHON3_SIMPLE_CDD_PACKAGE_SHA256" "$python3_simple_cdd_package" |
+    sha256sum -c - >/dev/null || fail "python3-simple-cdd package SHA-256 mismatch"
 
 [ -r "$authorized_keys" ] || fail "missing operator public key: $authorized_keys"
 awk '
@@ -185,6 +195,10 @@ jq -n \
     --arg iso_sha256 "$iso_sha256" \
     --arg debian "$DEBIAN_POINT_RELEASE" \
     --arg snapshot "$DEBIAN_SNAPSHOT" \
+    --arg simple_cdd "$SIMPLE_CDD_VERSION" \
+    --arg simple_cdd_snapshot "$SIMPLE_CDD_SNAPSHOT" \
+    --arg simple_cdd_package_sha256 "$SIMPLE_CDD_PACKAGE_SHA256" \
+    --arg python3_simple_cdd_package_sha256 "$PYTHON3_SIMPLE_CDD_PACKAGE_SHA256" \
     --arg technitium "$TECHNITIUM_VERSION" \
     --arg technitium_digest "$TECHNITIUM_AMD64_DIGEST" \
     --arg technitium_archive_sha256 "$archive_sha256" \
@@ -193,7 +207,7 @@ jq -n \
     --arg source_revision "$source_revision" \
     --arg source_repository "$source_repository" \
     --arg source_archive "$source_archive" \
-    '{schema_version:1,build_id:$build_id,iso:$iso,iso_sha256:$iso_sha256,debian_point_release:$debian,debian_snapshot:$snapshot,technitium_version:$technitium,technitium_image_digest:$technitium_digest,technitium_archive_sha256:$technitium_archive_sha256,tailscale_version:$tailscale,tailscale_archive_sha256:$tailscale_archive_sha256,source_revision:$source_revision,source_repository:$source_repository,source_archive:$source_archive}' \
+    '{schema_version:1,build_id:$build_id,iso:$iso,iso_sha256:$iso_sha256,debian_point_release:$debian,debian_snapshot:$snapshot,simple_cdd_version:$simple_cdd,simple_cdd_snapshot:$simple_cdd_snapshot,simple_cdd_package_sha256:$simple_cdd_package_sha256,python3_simple_cdd_package_sha256:$python3_simple_cdd_package_sha256,technitium_version:$technitium,technitium_image_digest:$technitium_digest,technitium_archive_sha256:$technitium_archive_sha256,tailscale_version:$tailscale,tailscale_archive_sha256:$tailscale_archive_sha256,source_revision:$source_revision,source_repository:$source_repository,source_archive:$source_archive}' \
     > "$artifact_dir/build-manifest.json"
 
 packages_file=$artifact_dir/debian-packages.txt
