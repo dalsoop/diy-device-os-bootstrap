@@ -13,6 +13,8 @@ archive=$cache_dir/technitium-dns-$TECHNITIUM_VERSION-amd64.oci.tar
 image_ref=$TECHNITIUM_IMAGE@$TECHNITIUM_AMD64_DIGEST
 tailscale_archive=$cache_dir/tailscale-$TAILSCALE_VERSION-amd64.tgz
 tailscale_licenses=$cache_dir/tailscale-$TAILSCALE_VERSION-dependency-licenses.md
+simple_cdd_package=$cache_dir/simple-cdd_${SIMPLE_CDD_VERSION}_all.deb
+python3_simple_cdd_package=$cache_dir/python3-simple-cdd_${SIMPLE_CDD_VERSION}_all.deb
 
 fail() {
     echo "fetch-locked-sources: $*" >&2
@@ -22,6 +24,34 @@ fail() {
 command -v skopeo >/dev/null 2>&1 || fail "skopeo is required"
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 mkdir -p "$cache_dir"
+
+if [ ! -s "$simple_cdd_package" ]; then
+    simple_cdd_partial=$simple_cdd_package.partial
+    trap 'rm -f "$simple_cdd_partial"' EXIT HUP INT TERM
+    curl --fail --location --proto '=https' --tlsv1.2 \
+        --output "$simple_cdd_partial" "$SIMPLE_CDD_PACKAGE_URL"
+    printf '%s  %s\n' "$SIMPLE_CDD_PACKAGE_SHA256" "$simple_cdd_partial" |
+        sha256sum -c -
+    mv "$simple_cdd_partial" "$simple_cdd_package"
+    trap - EXIT HUP INT TERM
+fi
+
+printf '%s  %s\n' "$SIMPLE_CDD_PACKAGE_SHA256" "$simple_cdd_package" |
+    sha256sum -c -
+
+if [ ! -s "$python3_simple_cdd_package" ]; then
+    python3_simple_cdd_partial=$python3_simple_cdd_package.partial
+    trap 'rm -f "$python3_simple_cdd_partial"' EXIT HUP INT TERM
+    curl --fail --location --proto '=https' --tlsv1.2 \
+        --output "$python3_simple_cdd_partial" "$PYTHON3_SIMPLE_CDD_PACKAGE_URL"
+    printf '%s  %s\n' "$PYTHON3_SIMPLE_CDD_PACKAGE_SHA256" "$python3_simple_cdd_partial" |
+        sha256sum -c -
+    mv "$python3_simple_cdd_partial" "$python3_simple_cdd_package"
+    trap - EXIT HUP INT TERM
+fi
+
+printf '%s  %s\n' "$PYTHON3_SIMPLE_CDD_PACKAGE_SHA256" "$python3_simple_cdd_package" |
+    sha256sum -c -
 
 remote_digest=$(skopeo inspect --override-os linux --override-arch amd64 \
     --format '{{.Digest}}' "docker://$image_ref")

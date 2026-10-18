@@ -22,6 +22,20 @@ printf '%s' "$DEBIAN_SNAPSHOT" | grep -Eq '^[0-9]{8}T[0-9]{6}Z$' ||
     fail "invalid Debian snapshot timestamp"
 printf '%s' "$SIMPLE_CDD_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
     fail "invalid Simple-CDD version"
+printf '%s' "$SIMPLE_CDD_SNAPSHOT" | grep -Eq '^[0-9]{8}T[0-9]{6}Z$' ||
+    fail "invalid Simple-CDD snapshot timestamp"
+case "$SIMPLE_CDD_PACKAGE_URL" in
+    https://snapshot.debian.org/archive/debian/"$SIMPLE_CDD_SNAPSHOT"/pool/main/s/simple-cdd/simple-cdd_"$SIMPLE_CDD_VERSION"_all.deb) ;;
+    *) fail "Simple-CDD package URL is not version and snapshot pinned" ;;
+esac
+printf '%s' "$SIMPLE_CDD_PACKAGE_SHA256" | grep -Eq '^[0-9a-f]{64}$' ||
+    fail "invalid Simple-CDD package SHA-256"
+case "$PYTHON3_SIMPLE_CDD_PACKAGE_URL" in
+    https://snapshot.debian.org/archive/debian/"$SIMPLE_CDD_SNAPSHOT"/pool/main/s/simple-cdd/python3-simple-cdd_"$SIMPLE_CDD_VERSION"_all.deb) ;;
+    *) fail "python3-simple-cdd package URL is not version and snapshot pinned" ;;
+esac
+printf '%s' "$PYTHON3_SIMPLE_CDD_PACKAGE_SHA256" | grep -Eq '^[0-9a-f]{64}$' ||
+    fail "invalid python3-simple-cdd package SHA-256"
 printf '%s' "$TECHNITIUM_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
     fail "invalid Technitium version"
 printf '%s' "$TECHNITIUM_INDEX_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' ||

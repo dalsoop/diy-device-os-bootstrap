@@ -26,7 +26,7 @@ evidence.
 
 ## Build gates
 
-- Build on an amd64 Debian 13.7 host with Simple-CDD 0.6.9.
+- Build on an amd64 Debian 13.7 host with the locked Simple-CDD 0.6.10 packages.
 - Build twice from clean ignored directories and compare ISO, package closure,
   manifest, and SBOM.
 - Verify the ISO checksum before and after USB writing.
