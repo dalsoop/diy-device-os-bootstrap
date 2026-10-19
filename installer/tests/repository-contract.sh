@@ -83,6 +83,9 @@ grep -q 'ConditionPathExists=!/var/lib/dns-appliance/COMPLETE' \
     "$repo_root/installer/payload/dns-appliance-firstboot.service"
 grep -q 'DNS-ENROLL' "$repo_root/installer/payload/dns-appliance-firstboot"
 grep -q 'previous_generation' "$repo_root/installer/scripts/install-gate"
+grep -q 'nic-modules-.*kernel_release.*-di_' "$repo_root/installer/scripts/install-gate"
+grep -q 'network hardware detection produced no interfaces' \
+    "$repo_root/installer/scripts/install-gate"
 grep -q 'Authorization: Bearer' "$repo_root/installer/payload/dns-appliance-health"
 grep -q 'unzip -t' "$repo_root/installer/payload/dns-appliance-backup"
 grep -q 'iifname "tailscale0"' "$repo_root/installer/payload/nftables.conf"

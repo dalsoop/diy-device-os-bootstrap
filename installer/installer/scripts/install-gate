@@ -13,6 +13,10 @@ device_root=${DNS_INSTALLER_DEVICE_ROOT:-/dev}
 zero_command=${DNS_INSTALLER_ZERO_COMMAND:-dd}
 blockdev_command=${DNS_INSTALLER_BLOCKDEV_COMMAND:-blockdev}
 sync_command=${DNS_INSTALLER_SYNC_COMMAND:-sync}
+package_pool=${DNS_INSTALLER_PACKAGE_POOL:-/cdrom/pool}
+udpkg_command=${DNS_INSTALLER_UDPKG_COMMAND:-udpkg}
+network_detect_command=${DNS_INSTALLER_NETWORK_DETECT_COMMAND:-/bin/hw-detect}
+uname_command=${DNS_INSTALLER_UNAME_COMMAND:-uname}
 state_file=$state_dir/install.env
 
 fail() {
@@ -41,6 +45,41 @@ read_first_line() {
 
 set_debconf() {
     "$debconf_set_command" "$@"
+}
+
+network_device_present() {
+    for nic_path in "$sys_root"/class/net/*; do
+        [ -d "$nic_path" ] || continue
+        [ "${nic_path##*/}" = lo ] && continue
+        return 0
+    done
+    return 1
+}
+
+ensure_network_hardware() {
+    network_device_present && return 0
+
+    kernel_release=$("$uname_command" -r) || fail "cannot identify installer kernel"
+    case "$kernel_release" in
+        ''|*[!A-Za-z0-9.+~-]*) fail "installer kernel release is invalid" ;;
+    esac
+
+    module_count=0
+    module_package=
+    for candidate in \
+        "$package_pool"/*/*/*/nic-modules-"$kernel_release"-di_*.udeb; do
+        [ -f "$candidate" ] || continue
+        module_count=$((module_count + 1))
+        module_package=$candidate
+    done
+    [ "$module_count" -eq 1 ] ||
+        fail "found $module_count NIC module packages for kernel $kernel_release; expected exactly one"
+
+    command -v "$udpkg_command" >/dev/null 2>&1 || fail "$udpkg_command is required"
+    [ -x "$network_detect_command" ] || fail "$network_detect_command is required"
+    "$udpkg_command" --unpack "$module_package" || fail "cannot unpack installer NIC modules"
+    "$network_detect_command" || fail "network hardware detection failed"
+    network_device_present || fail "network hardware detection produced no interfaces"
 }
 
 load_config() {
@@ -91,6 +130,8 @@ load_config() {
 }
 
 match_node() {
+    ensure_network_hardware
+
     product_name_hash=$(hash_value "$(read_first_line "$sys_root/class/dmi/id/product_name")")
     product_sku_hash=$(hash_value "$(read_first_line "$sys_root/class/dmi/id/product_sku")")
     system_serial_hash=$(hash_value "$(read_first_line "$sys_root/class/dmi/id/product_serial")")

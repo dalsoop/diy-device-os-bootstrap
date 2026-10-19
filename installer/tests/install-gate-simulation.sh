@@ -33,9 +33,25 @@ cat > "$test_root/bin/dns-test-sync" <<'EOF'
 #!/bin/sh
 printf 'sync\n' >> "${DNS_TEST_SYNC_LOG:?}"
 EOF
+cat > "$test_root/bin/dns-test-udpkg" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "${DNS_TEST_NETWORK_LOG:?}"
+EOF
+cat > "$test_root/bin/dns-test-hw-detect" <<'EOF'
+#!/bin/sh
+printf 'hw-detect\n' >> "${DNS_TEST_NETWORK_LOG:?}"
+mkdir -p "${DNS_TEST_SYS_ROOT:?}/class/net/en0"
+printf '00:11:22:33:44:55\n' > "${DNS_TEST_SYS_ROOT:?}/class/net/en0/address"
+EOF
+cat > "$test_root/bin/dns-test-uname" <<'EOF'
+#!/bin/sh
+[ "${1:-}" = -r ] || exit 1
+printf 'test-kernel\n'
+EOF
 chmod 0755 "$test_root/bin/sha256sum" "$test_root/bin/debconf-set" \
     "$test_root/bin/dns-test-dd" "$test_root/bin/dns-test-blockdev" \
-    "$test_root/bin/dns-test-sync"
+    "$test_root/bin/dns-test-sync" "$test_root/bin/dns-test-udpkg" \
+    "$test_root/bin/dns-test-hw-detect" "$test_root/bin/dns-test-uname"
 
 normalize() {
     LC_ALL=C tr '[:lower:]' '[:upper:]' |
@@ -152,10 +168,16 @@ run_gate() {
     DNS_INSTALLER_ZERO_COMMAND="$test_root/bin/dns-test-dd" \
     DNS_INSTALLER_BLOCKDEV_COMMAND="$test_root/bin/dns-test-blockdev" \
     DNS_INSTALLER_SYNC_COMMAND="$test_root/bin/dns-test-sync" \
+    DNS_INSTALLER_PACKAGE_POOL="$root/package-pool" \
+    DNS_INSTALLER_UDPKG_COMMAND="$test_root/bin/dns-test-udpkg" \
+    DNS_INSTALLER_NETWORK_DETECT_COMMAND="$test_root/bin/dns-test-hw-detect" \
+    DNS_INSTALLER_UNAME_COMMAND="$test_root/bin/dns-test-uname" \
     DNS_TEST_DEBCONF_LOG="$root/debconf.log" \
     DNS_TEST_DISK_LOG="$root/disk.log" \
     DNS_TEST_BLOCKDEV_LOG="$root/blockdev.log" \
     DNS_TEST_SYNC_LOG="$root/sync.log" \
+    DNS_TEST_NETWORK_LOG="$root/network.log" \
+    DNS_TEST_SYS_ROOT="$root/sys" \
     PATH="$test_root/bin:$PATH" \
         /bin/sh "$gate" "$phase"
 }
@@ -199,6 +221,25 @@ expect_failure() {
 
 root=$(make_fixture valid)
 expect_success valid_exact_match "$root"
+
+root=$(make_fixture missing-network-driver)
+rm -rf "$root/sys/class/net/en0"
+mkdir -p "$root/package-pool/main/l/linux-signed-amd64"
+: > "$root/package-pool/main/l/linux-signed-amd64/nic-modules-test-kernel-di_1.udeb"
+expect_success missing_network_driver_is_loaded "$root"
+grep -q '^--unpack .*nic-modules-test-kernel-di_1.udeb$' "$root/network.log"
+grep -q '^hw-detect$' "$root/network.log"
+
+root=$(make_fixture missing-network-package)
+rm -rf "$root/sys/class/net/en0"
+expect_failure missing_network_module_package_is_blocked "$root"
+
+root=$(make_fixture ambiguous-network-packages)
+rm -rf "$root/sys/class/net/en0"
+mkdir -p "$root/package-pool/main/l/linux-signed-amd64"
+: > "$root/package-pool/main/l/linux-signed-amd64/nic-modules-test-kernel-di_1.udeb"
+: > "$root/package-pool/main/l/linux-signed-amd64/nic-modules-test-kernel-di_2.udeb"
+expect_failure ambiguous_network_module_packages_are_blocked "$root"
 
 root=$(make_fixture wrong-dmi)
 printf 'OTHER-SERIAL\n' > "$root/sys/class/dmi/id/product_serial"
@@ -344,4 +385,4 @@ authorize_erase=true
 EOF
 expect_failure stale_reinstall_token_is_blocked "$root"
 
-printf 'RESULT 26/26 install-gate simulations passed\n'
+printf 'RESULT 29/29 install-gate simulations passed\n'
