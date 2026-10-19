@@ -263,12 +263,12 @@ root=$(make_fixture valid)
 expect_success valid_exact_match "$root"
 
 root=$(make_fixture attached-enrollment)
-DNS_TEST_ENROLLMENT_DIR= expect_success attached_fat32_enrollment_is_mounted "$root"
+DNS_TEST_ENROLLMENT_DIR='' expect_success attached_fat32_enrollment_is_mounted "$root"
 grep -q '^vfat$' "$root/enrollment.log"
 grep -q '^mount -o ro,nodev,nosuid,noexec /dev/test-enrollment ' "$root/enrollment.log"
 
 root=$(make_fixture missing-fat32-module)
-DNS_TEST_ENROLLMENT_DIR= DNS_TEST_MODPROBE_FAIL=1 \
+DNS_TEST_ENROLLMENT_DIR='' DNS_TEST_MODPROBE_FAIL=1 \
     expect_failure missing_fat32_module_is_blocked "$root"
 
 root=$(make_fixture missing-network-driver)
