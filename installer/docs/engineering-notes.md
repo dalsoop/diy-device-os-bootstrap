@@ -132,6 +132,18 @@ Response: write every dynamic answer as a typed `d-i` line to
 file does. The simulation's `debconf-set` stub always exits 10 so a regression
 to it fails in source tests.
 
+Symptom: with the answers piped to `debconf-set-selections`, the gate succeeds
+and writes `install.env`, but netcfg still asks for the IP address in both BIOS
+and UEFI VM installs, and `questions.dat` holds no value for the netcfg keys.
+
+Cause: the installer's `/bin/debconf-set-selections` is a shell script that
+reads only the file named by `$1`. Given stdin, it greps an empty filename,
+loops over nothing, and exits 0.
+
+Response: stage each answer in a file under the gate state directory and pass
+its path. The simulation's stub reads only its file argument and fails when
+called without one.
+
 Symptom: the expected target is rejected as active even though `/dev/sda` is
 not listed directly in `/proc/mounts`.
 

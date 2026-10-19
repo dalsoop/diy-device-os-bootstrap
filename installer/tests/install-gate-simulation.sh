@@ -24,9 +24,12 @@ cat > "$test_root/bin/debconf-set" <<'EOF'
 printf 'debconf-set %s\n' "$*" >> "${DNS_TEST_DEBCONF_LOG:?}"
 exit 10
 EOF
+# Like the installer's debconf-set-selections, read only the named file. The
+# real one exits 0 and sets nothing when given stdin, so the stub fails instead.
 cat > "$test_root/bin/debconf-set-selections" <<'EOF'
 #!/bin/sh
 [ "${DNS_TEST_SELECTIONS_FAIL:-0}" != 1 ] || exit 1
+[ "$#" -eq 1 ] && [ -r "$1" ] || exit 1
 while IFS=' ' read -r owner key type value; do
     [ "$owner" = d-i ] || exit 1
     case "$type" in
@@ -40,7 +43,7 @@ while IFS=' ' read -r owner key type value; do
         *) exit 1 ;;
     esac
     printf '%s %s\n' "$key" "$value" >> "${DNS_TEST_DEBCONF_LOG:?}"
-done
+done < "$1"
 EOF
 cat > "$test_root/bin/dns-test-dd" <<'EOF'
 #!/bin/sh

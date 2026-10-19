@@ -49,7 +49,8 @@ read_first_line() {
 
 # Preseed answers through debconf-set-selections. Unlike debconf-set, it
 # registers questions whose owning udeb has not loaded yet, which is the case
-# for netcfg during preseed/early_command.
+# for netcfg during preseed/early_command. The installer's version reads only
+# the file named by its argument and silently sets nothing from stdin.
 preseed_answer() {
     key=$1
     type=$2
@@ -58,8 +59,12 @@ preseed_answer() {
         *"
 "*) fail "preseed value for $key contains a newline" ;;
     esac
-    printf 'd-i %s %s %s\n' "$key" "$type" "$value" | "$debconf_selections_command" ||
-        fail "cannot preseed $key"
+    mkdir -p "$state_dir"
+    answer_file=$state_dir/answer.preseed
+    printf 'd-i %s %s %s\n' "$key" "$type" "$value" > "$answer_file" ||
+        fail "cannot stage the preseed answer for $key"
+    "$debconf_selections_command" "$answer_file" || fail "cannot preseed $key"
+    rm -f "$answer_file"
 }
 
 network_device_present() {
