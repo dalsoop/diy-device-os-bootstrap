@@ -95,6 +95,11 @@ grep -q 'simple_cdd_package_sha256' "$repo_root/installer/build-image"
 grep -q 'tailscale-dependency-licenses.md' "$repo_root/installer/build-image"
 grep -q 'licenseDeclared:"NOASSERTION"' "$repo_root/installer/build-image"
 grep -q 'licenseDeclared:"GPL-3.0-only"' "$repo_root/installer/build-image"
+grep -qx 'bind9-dnsutils' "$repo_root/installer/simple-cdd/profiles/dns.packages"
+if grep -qx 'dnsutils' "$repo_root/installer/simple-cdd/profiles/dns.packages"; then
+    echo "repository-contract: use the concrete bind9-dnsutils package, not its virtual dnsutils name" >&2
+    exit 1
+fi
 grep -q '/usr/share/doc/diy-device-os-bootstrap/SOURCE.md' \
     "$repo_root/installer/simple-cdd/profiles/dns.postinst"
 grep -q 'manifests/LICENSES.SHA256' "$repo_root/usb-media/write-usb-linux"
