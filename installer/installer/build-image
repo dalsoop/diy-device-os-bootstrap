@@ -213,7 +213,7 @@ jq -n \
 
 packages_file=$artifact_dir/debian-packages.txt
 packages_raw=$artifact_dir/.debian-packages.raw
-package_pool=$builder_dir/tmp/cd-build/$CODENAME/CD1/pool
+package_pool=$builder_dir/tmp/cd-build/$VERSION_CODENAME/CD1/pool
 [ -d "$package_pool" ] || fail "Simple-CDD completed without a package pool"
 find "$package_pool" -type f \( -name '*.deb' -o -name '*.udeb' \) \
     -exec sh -c '
