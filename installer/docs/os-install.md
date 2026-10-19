@@ -119,8 +119,8 @@ command without checking `lsblk`.
 
 ## Install behavior
 
-Boot the generated image and deliberately select the installer entry. There is
-no automatic boot timeout. After that selection, hardware identity chooses the
+Boot the generated image and deliberately select the installer entry. Both the
+UEFI and BIOS menus wait without a timeout. After that selection, hardware identity chooses the
 role and the remaining Debian installation is unattended. A mismatch stops the
 installer before partitioning.
 

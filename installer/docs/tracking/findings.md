@@ -73,4 +73,20 @@ signed vendor checksum provenance for every release. Reviewers must verify each
 digest against an authoritative vendor channel when updating entries. This
 cannot be solved by trusting a successful download of the same URL.
 
+## Debian CD turned BOOT_TIMEOUT=0 into an immediate UEFI install
 
+On 2026-10-20, QEMU validation of the 31f9f6f image showed both menus booting
+without a key. `simple-cdd.conf` sets `BOOT_TIMEOUT="0"`, which isolinux reads
+as "wait", but Debian CD also appended `set timeout=0` to GRUB, which boots the
+default preseeded "Graphical install" at once. Under UEFI, a DNS USB left first
+in the boot order would therefore reinstall the matching appliance on every
+reboot, with only the inventory gate in the way. The stock BIOS menu also kept
+`timeout 300` to a speech-synthesis installer; that entry had no preseed and
+stopped at its first prompt.
+
+`build-image` now rewrites GRUB to `set timeout=-1`, removes isolinux
+`timeout`, `ontimeout`, and `menu autoboot` lines, replays the original boot
+records with `xorriso -boot_image any replay`, and fails unless the re-read
+image has no timeout. A remaster of the 31f9f6f image stayed at both menus for
+100 seconds without a key and kept its MBR isohybrid, GPT, APM, and EFI
+partition layout. No physical USB has carried an image with this fix yet.

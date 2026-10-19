@@ -40,6 +40,7 @@ command -v skopeo >/dev/null 2>&1 || fail "skopeo is required"
 command -v git >/dev/null 2>&1 || fail "git is required"
 command -v jq >/dev/null 2>&1 || fail "jq is required"
 command -v dpkg-deb >/dev/null 2>&1 || fail "dpkg-deb is required"
+command -v xorriso >/dev/null 2>&1 || fail "xorriso is required"
 
 case "$source_repository" in
     https://*) ;;
@@ -179,6 +180,51 @@ build-simple-cdd --conf simple-cdd.conf --profiles dns
 
 set -- images/*.iso
 [ -e "$1" ] || fail "Simple-CDD completed without an ISO"
+[ "$#" -eq 1 ] || fail "Simple-CDD produced more than one ISO"
+
+# Debian CD writes BOOT_TIMEOUT=0 to GRUB as `set timeout=0`, which boots the
+# preseeded installer at once under UEFI, and keeps the BIOS menu's timeout to
+# the speech-synthesis installer. Rewrite both menus to wait for a deliberate
+# selection, then prove the rewritten image carries no boot timeout.
+extract_menus() {
+    rm -rf "$2"
+    mkdir -p "$2"
+    xorriso -osirrox on -indev "$1" \
+        -extract /boot/grub/grub.cfg "$2/grub.cfg" \
+        -extract /isolinux "$2/isolinux" >/dev/null 2>&1 ||
+        fail "cannot read the boot menus from the ISO"
+    chmod -R u+w "$2"
+}
+menu_timeouts() {
+    grep -n -E '^[[:space:]]*set[[:space:]]+timeout=' "$1/grub.cfg" |
+        grep -v -E 'set[[:space:]]+timeout=-1[[:space:]]*$' || true
+    grep -n -i -E '^[[:space:]]*(timeout[[:space:]]+[1-9]|ontimeout|menu[[:space:]]+autoboot)' \
+        "$1"/isolinux/*.cfg || true
+}
+built_iso=$1
+menu_dir=$builder_dir/tmp/boot-menus
+extract_menus "$built_iso" "$menu_dir"
+sed -i -E 's/^([[:space:]]*set[[:space:]]+timeout=).*/\1-1/' "$menu_dir/grub.cfg"
+grep -q -E '^[[:space:]]*set[[:space:]]+timeout=-1' "$menu_dir/grub.cfg" ||
+    printf 'set timeout=-1\n' >> "$menu_dir/grub.cfg"
+set -- -update "$menu_dir/grub.cfg" /boot/grub/grub.cfg
+for menu in "$menu_dir"/isolinux/*.cfg; do
+    if grep -q -i -E '^[[:space:]]*(timeout[[:space:]]+[1-9]|ontimeout|menu[[:space:]]+autoboot)' "$menu"; then
+        sed -i -E '/^[[:space:]]*# timeout to speech-enabled install/d;
+            /^[[:space:]]*([Tt][Ii][Mm][Ee][Oo][Uu][Tt][[:space:]]+[1-9]|[Oo][Nn][Tt][Ii][Mm][Ee][Oo][Uu][Tt]|[Mm][Ee][Nn][Uu][[:space:]]+[Aa][Uu][Tt][Oo][Bb][Oo][Oo][Tt])/d' "$menu"
+        set -- "$@" -update "$menu" "/isolinux/${menu##*/}"
+    fi
+done
+xorriso -indev "$built_iso" -outdev "$built_iso.menus" -boot_image any replay "$@" \
+    >/dev/null 2>&1 || fail "cannot rewrite the ISO boot menus"
+mv -f "$built_iso.menus" "$built_iso"
+set -- "$built_iso"
+extract_menus "$built_iso" "$menu_dir"
+[ -z "$(menu_timeouts "$menu_dir")" ] || fail "the ISO boot menus still contain an automatic timeout"
+grep -q -E '^[[:space:]]*set[[:space:]]+timeout=-1' "$menu_dir/grub.cfg" ||
+    fail "GRUB does not wait for a deliberate selection"
+rm -rf "$menu_dir"
+
 mkdir -p "$artifact_dir"
 sha256sum "$@" | tee "$artifact_dir/SHA256SUMS"
 

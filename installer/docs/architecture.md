@@ -102,7 +102,9 @@ Technitium OCI image, a checksum-pinned Tailscale archive, inventory matching,
 and first-boot units. A separate `DNS-ENROLL` FAT32 partition receives
 plaintext enrollment evidence and age-encrypted recovery secrets.
 
-The boot menu has no destructive timeout. After a deliberate DNS installer
+The boot menu has no automatic timeout. `build-image` rewrites the GRUB and
+isolinux menus that Debian CD generates so both wait for a key, and it fails
+the build if any timeout remains (see findings). After a deliberate DNS installer
 selection, `install-gate` must resolve exactly one inventory role and exactly
 one non-removable, non-USB internal disk before partitioning. It resolves the
 `/cdrom` source through partition and device-mapper ancestry to the physical
