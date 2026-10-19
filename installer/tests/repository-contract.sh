@@ -111,7 +111,13 @@ if grep -qx 'exfatprogs' "$repo_root/installer/simple-cdd/profiles/dns.packages"
     exit 1
 fi
 grep -q 'modprobe_command.*vfat' "$repo_root/installer/scripts/install-gate"
-grep -q 'anna_install_command.*netcfg' "$repo_root/installer/scripts/install-gate"
+grep -q 'debconf_selections_command.*debconf-set-selections' \
+    "$repo_root/installer/scripts/install-gate"
+if grep -v '^[[:space:]]*#' "$repo_root/installer/scripts/install-gate" |
+    grep -Eq 'debconf-set([^-]|$)'; then
+    printf 'install-gate must not answer installer questions with debconf-set\n' >&2
+    exit 1
+fi
 grep -q 'mkfs.fat -F 32' "$repo_root/installer/write-usb-linux"
 grep -q 'mkfs.fat -F 32' "$repo_root/usb-media/write-usb-linux"
 if grep -q 'mkfs.exfat' "$repo_root/installer/write-usb-linux" "$repo_root/usb-media/write-usb-linux"; then
