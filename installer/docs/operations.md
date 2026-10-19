@@ -72,7 +72,9 @@ sudo DEVICE_OS_MEDIA=inventory-capture ./device-os world burn \
   --confirm 'ERASE /dev/sdX USB_SERIAL'
 ```
 
-Boot every target HP from that USB and follow `guides/DNS_INVENTORY.md`. Import
+Boot every target HP from that USB and run
+`sudo mount -L DEVICE-INST /mnt && sudo sh /mnt/tools/dns-inventory`, as
+`guides/DNS_INVENTORY.md` describes. Import
 the resulting files into the ignored `installer/inventory/local/` directory.
 The capture output leaves `destructive_install_enabled=false`.
 

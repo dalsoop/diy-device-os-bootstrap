@@ -66,6 +66,7 @@ jq -e '
   .world.media.id == "inventory-capture" and
   .usb.enrollment_reserve_mib == 0 and
   ([.bundles[].id] | index("dns-inventory-capture")) != null and
+  ([.bundles[] | select(.id == "dns-inventory-wizard") | .destination] == ["tools/dns-inventory"]) and
   ([.bundles[].id] | index("dns-inventory-guide")) != null
 ' "$temporary/inventory-catalog.json" >/dev/null ||
     fail "inventory media did not resolve as a non-destructive USB plan"

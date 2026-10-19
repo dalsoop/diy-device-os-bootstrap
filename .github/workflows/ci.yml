@@ -76,6 +76,7 @@ jobs:
           tests/tailscale-enrollment-simulation.sh
           tests/media-catalog-simulation.sh
           tests/macos-writer-simulation.sh
+          tests/inventory-wizard-simulation.sh
           tests/repository-contract.sh
       - name: Run Agent Gateway simulation
         run: /tmp/device-os-agent-ci/bin/python agent/tests/gateway_simulation.py

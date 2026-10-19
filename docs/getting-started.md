@@ -145,7 +145,14 @@ sudo DEVICE_OS_MEDIA=inventory-capture ./device-os world burn \
   --confirm 'ERASE /dev/sdX USB_SERIAL'
 ```
 
-Boot each HP into Debian Live and follow `guides/DNS_INVENTORY.md` on the USB.
+Boot each HP into Debian Live and run the guided capture, which asks three
+numbered questions and saves one file on the USB (`guides/DNS_INVENTORY.md`
+has the details and a manual fallback):
+
+```sh
+sudo mount -L DEVICE-INST /mnt && sudo sh /mnt/tools/dns-inventory
+```
+
 Copy the resulting `inventory-dns01.conf` through `inventory-dns03.conf` files
 into the ignored `installer/inventory/local/` directory on the management host.
 This first pass never authorizes internal-disk erasure.

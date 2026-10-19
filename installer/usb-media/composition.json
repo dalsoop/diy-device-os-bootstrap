@@ -38,6 +38,11 @@
       "source": { "kind": "repository-file", "path": "installer/capture-inventory" }
     },
     {
+      "id": "dns-inventory-wizard",
+      "destination": "tools/dns-inventory",
+      "source": { "kind": "repository-file", "path": "installer/inventory-wizard" }
+    },
+    {
       "id": "dns-inventory-guide",
       "destination": "guides/DNS_INVENTORY.md",
       "source": { "kind": "repository-file", "path": "usb-media/guides/dns-inventory.md" }

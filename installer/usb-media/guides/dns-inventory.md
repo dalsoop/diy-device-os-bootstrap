@@ -7,36 +7,40 @@ been built from inventory captured on each target HP computer.
 
 1. Boot the `Debian Live 13.7.0` device-inspection entry from the Ventoy menu.
    Do not start an installer.
-2. Open a root terminal and identify the wired interface and internal disk:
+2. At the shell prompt, mount the USB data partition and start the guided
+   capture:
 
    ```sh
-   ip -brief link
-   lsblk -d -o NAME,MODEL,SERIAL,SIZE,TRAN,RM
+   sudo mount -L DEVICE-INST /mnt && sudo sh /mnt/tools/dns-inventory
    ```
 
-3. Locate and mount the `DEVICE-INST` partition:
+3. Answer the three numbered questions: role (`dns01`, `dns02`, or `dns03`;
+   the address follows from the role), wired interface, and internal disk.
+   The lists already exclude loopback, virtual, and wireless interfaces, and
+   the USB, removable, and loop disks. Type the role name to save.
+4. The wizard writes only `/mnt/inventory-<role>.conf`, reads it back, and
+   lists the roles captured so far. Identity values are SHA-256 hashes and
+   `destructive_install_enabled` is always `false`. An existing file is kept
+   unless you type `overwrite`.
+5. Run `sudo umount /mnt`, shut down, and repeat on the next machine. Never
+   reuse one machine's file for another machine, even when their HP model
+   numbers match.
 
-   ```sh
-   lsblk -o NAME,LABEL,FSTYPE,MOUNTPOINTS
-   sudo mkdir -p /mnt/device-inst
-   sudo mount -L DEVICE-INST /mnt/device-inst
-   ```
+The wizard shows Korean in a terminal that can draw Hangul. The Linux text
+console cannot, so the wizard uses English there; `--lang ko` or `--lang en`
+overrides the choice.
 
-4. Run the bundled capture command, substituting the role, address, interface,
-   disk, and actual mounted path:
+## Manual fallback
 
-   ```sh
-   sudo sh /mnt/device-inst/tools/capture-inventory \
-     dns01 10.0.5.1 enp1s0 /dev/sda | \
-     sudo tee /mnt/device-inst/inventory-dns01.conf >/dev/null
-   sync
-   ```
+If the wizard cannot run, identify the interface and disk with
+`ip -brief link` and `lsblk -d -o NAME,MODEL,SERIAL,SIZE,TRAN,RM`, then run the
+capture command directly:
 
-5. Re-open the generated file and confirm that the role and address are right.
-   The identity values are SHA-256 hashes; `destructive_install_enabled` must
-   remain `false` during capture.
-6. Shut down and repeat for `dns02` and `dns03`. Never reuse one machine's file
-   for another machine, even when their HP model numbers match.
+```sh
+sudo sh /mnt/tools/capture-inventory dns01 10.0.5.1 enp1s0 /dev/sda | \
+  sudo tee /mnt/inventory-dns01.conf >/dev/null
+sync
+```
 
 The management host imports these three files into the ignored
 `installer/inventory/local/` directory. It enables only the current pilot,

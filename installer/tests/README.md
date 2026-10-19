@@ -46,6 +46,15 @@ an isolated fixture. It proves that the writer verifies the image body before
 exposing the partition map, verifies the first MiB last, and does not commit or
 eject after a failed body readback. It never opens a real device.
 
+`inventory-wizard-simulation.sh` runs the guided capture against a fixture
+sysfs and mount table. It proves that only wired interfaces and internal,
+non-removable, non-USB disks other than the inventory medium are offered; that
+the one saved file holds hashes and `destructive_install_enabled=false`; and
+that a wrong confirmation, ended input, repeated invalid numbers, a non-root
+user, an unmounted or read-only medium, or a missing internal disk saves
+nothing. An existing file is replaced only after `overwrite`. It does not prove
+that Debian Live renders Hangul or that real HP sysfs values match the fixture.
+
 This simulation is necessary but not sufficient. It does not replace building
 the ISO, booting Debian Installer under BIOS and UEFI, or the physical `dns01`
 pilot.

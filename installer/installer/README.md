@@ -8,6 +8,9 @@ This directory contains the first implementation of the Debian OS installer:
 - `write-usb-linux` writes the verified ISO and appends `DNS-ENROLL` after an
   exact destructive confirmation.
 - `capture-inventory` hashes the exact identity of one HP PC, NIC, and disk.
+- `inventory-wizard` (`tools/dns-inventory` on the USB) asks for the role,
+  wired interface, and internal disk by number, offers only install-gate
+  candidates, and saves one `inventory-<role>.conf` on the inventory medium.
 - `simple-cdd/` holds the unattended Debian Installer profile.
 - `scripts/install-gate` refuses partitioning unless one inventory entry and one
   internal disk match exactly.

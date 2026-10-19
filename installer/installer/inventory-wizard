@@ -1,0 +1,233 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Guided, non-destructive inventory capture for one DNS appliance. It reads
+# only sysfs and writes a single inventory file to the medium it runs from.
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+capture=$script_dir/capture-inventory
+output_dir=$(dirname -- "$script_dir")
+sys_root=${DNS_INVENTORY_SYS_ROOT:-/sys}
+mounts_file=${DNS_INVENTORY_MOUNTS_FILE:-/proc/mounts}
+id_command=${DNS_INVENTORY_ID_COMMAND:-id}
+sync_command=${DNS_INVENTORY_SYNC_COMMAND:-sync}
+export DNS_INVENTORY_SYS_ROOT="$sys_root"
+
+usage() {
+    echo "usage: sudo sh $0 [--lang ko|en]" >&2
+    exit 2
+}
+
+# The Linux text console cannot draw Hangul, so Korean is the default only
+# where a terminal emulator can render it.
+lang=en
+[ "${TERM:-linux}" = linux ] || lang=ko
+case "$#" in
+    0) ;;
+    2) [ "$1" = --lang ] || usage
+       case "$2" in ko|en) lang=$2 ;; *) usage ;; esac ;;
+    *) usage ;;
+esac
+
+say() {
+    if [ "$lang" = ko ]; then printf '%s\n' "$1"; else printf '%s\n' "$2"; fi
+}
+
+fail() {
+    say "오류: $1" "Error: $2" >&2
+    exit 1
+}
+
+staged=
+trap '[ -z "$staged" ] || rm -f "$staged"' EXIT HUP INT TERM
+
+answer=
+ask() {
+    printf '%s ' "$1"
+    IFS= read -r answer || fail "입력이 끝났습니다. 아무것도 저장하지 않았습니다." \
+        "input ended. Nothing was saved."
+}
+
+choice=
+choose() {
+    count=$1
+    attempts=0
+    while [ "$attempts" -lt 3 ]; do
+        ask "$(say "번호를 입력하세요 [1-$count]:" "Enter a number [1-$count]:")"
+        [ -n "$answer" ] || [ "$count" -ne 1 ] || answer=1
+        case "$answer" in
+            ''|*[!0-9]*) ;;
+            *)
+                if [ "$answer" -ge 1 ] && [ "$answer" -le "$count" ]; then
+                    choice=$answer
+                    return 0
+                fi
+                ;;
+        esac
+        say "  목록에 없는 번호입니다." "  That number is not in the list."
+        attempts=$((attempts + 1))
+    done
+    fail "세 번 잘못 입력해 중단합니다. 아무것도 저장하지 않았습니다." \
+        "stopped after three invalid answers. Nothing was saved."
+}
+
+first_line() {
+    sed -n '1p' "$1" 2>/dev/null || true
+}
+
+mount_entry() {
+    awk -v dir="$output_dir" '$2 == dir { entry = $1 " " $4 } END { print entry }' "$mounts_file"
+}
+
+# Prints the whole disk that holds the inventory medium.
+media_disk() {
+    source=${1##*/}
+    if [ -e "$sys_root/class/block/$source/partition" ]; then
+        parent=$(readlink -f "$sys_root/class/block/$source")
+        parent=${parent%/*}
+        printf '%s\n' "${parent##*/}"
+    else
+        printf '%s\n' "$source"
+    fi
+}
+
+wired_interfaces() {
+    for path in "$sys_root"/class/net/*; do
+        [ -e "$path/device" ] || continue
+        [ ! -e "$path/wireless" ] && [ ! -e "$path/phy80211" ] || continue
+        printf '%s\n' "${path##*/}"
+    done
+}
+
+# Mirrors the install gate's candidate rules so a captured disk can match.
+internal_disks() {
+    for path in "$sys_root"/class/block/*; do
+        disk=${path##*/}
+        case "$disk" in
+            loop*|ram*|fd*|sr*|dm-*|md*|zram*) continue ;;
+        esac
+        [ -e "$path" ] || continue
+        [ ! -e "$path/partition" ] || continue
+        [ "$(first_line "$path/removable")" = 0 ] || continue
+        [ "$disk" != "$installer_disk" ] || continue
+        [ -r "$path/device/model" ] && [ -r "$path/device/serial" ] || continue
+        case "$(readlink -f "$path/device")" in
+            */usb*/*) continue ;;
+        esac
+        printf '%s\n' "$disk"
+    done
+}
+
+say "== DNS 장비 인벤토리 수집 ==" "== DNS appliance inventory capture =="
+say "이 도구는 장비 정보를 읽기만 하고, 내부 디스크는 건드리지 않습니다." \
+    "This tool only reads hardware details and never touches internal disks."
+echo
+
+[ "$("$id_command" -u)" = 0 ] || fail "root 권한이 필요합니다: sudo sh $0" \
+    "root is required: sudo sh $0"
+[ -r "$capture" ] || fail "같은 폴더에 capture-inventory 가 없습니다." \
+    "capture-inventory is missing next to this tool."
+entry=$(mount_entry)
+[ -n "$entry" ] || fail "DEVICE-INST 파티션을 마운트한 뒤 그 안의 tools/dns-inventory 를 실행하세요." \
+    "mount the DEVICE-INST partition and run tools/dns-inventory from it."
+case ",${entry#* }," in
+    *,ro,*) fail "DEVICE-INST 가 읽기 전용으로 마운트되었습니다." \
+        "DEVICE-INST is mounted read-only." ;;
+esac
+installer_disk=$(media_disk "${entry%% *}")
+
+say "1단계. 이 장비의 역할을 고르세요." "Step 1. Choose this machine's role."
+echo "  1) dns01  10.0.5.1"
+echo "  2) dns02  10.0.5.2"
+echo "  3) dns03  10.0.5.3"
+choose 3
+role=dns0$choice
+address=10.0.5.$choice
+echo
+
+interfaces=$(wired_interfaces)
+[ -n "$interfaces" ] || fail "유선 네트워크 장치를 찾지 못했습니다." \
+    "no wired network interface was found."
+say "2단계. DNS 서비스에 쓸 유선 네트워크를 고르세요." \
+    "Step 2. Choose the wired interface for DNS service."
+count=0
+for interface in $interfaces; do
+    count=$((count + 1))
+    if [ "$(first_line "$sys_root/class/net/$interface/carrier")" = 1 ]; then
+        link=$(say "케이블 연결됨" "cable connected")
+    else
+        link=$(say "케이블 없음" "no cable")
+    fi
+    printf '  %d) %-12s %s  %s\n' "$count" "$interface" \
+        "$(first_line "$sys_root/class/net/$interface/address")" "$link"
+done
+choose "$count"
+interface=$(printf '%s\n' "$interfaces" | sed -n "${choice}p")
+echo
+
+disks=$(internal_disks)
+[ -n "$disks" ] || fail "설치할 내부 디스크를 찾지 못했습니다. USB 와 이동식 디스크는 제외됩니다." \
+    "no internal disk was found. USB and removable disks are excluded."
+say "3단계. DNS 장비를 설치할 내부 디스크를 고르세요." \
+    "Step 3. Choose the internal disk for the DNS appliance."
+count=0
+for disk in $disks; do
+    count=$((count + 1))
+    sectors=$(first_line "$sys_root/class/block/$disk/size")
+    printf '  %d) %-10s %-28s %s GB\n' "$count" "$disk" \
+        "$(first_line "$sys_root/class/block/$disk/device/model" | sed 's/[[:space:]]*$//')" \
+        "$(awk -v s="${sectors:-0}" 'BEGIN { printf "%.0f", s * 512 / 1000000000 }')"
+done
+choose "$count"
+disk=$(printf '%s\n' "$disks" | sed -n "${choice}p")
+echo
+
+target=$output_dir/inventory-$role.conf
+staged=$(mktemp "$output_dir/.inventory-$role.XXXXXX")
+sh "$capture" "$role" "$address" "$interface" "/dev/$disk" > "$staged" ||
+    fail "하드웨어 정보를 읽지 못했습니다. 위 메시지를 확인하세요." \
+        "could not read the hardware identity; see the message above."
+grep -qx "role=$role" "$staged" && grep -qx 'destructive_install_enabled=false' "$staged" ||
+    fail "수집 결과가 예상과 다릅니다. 저장하지 않았습니다." \
+        "the capture output is unexpected. Nothing was saved."
+
+say "4단계. 확인" "Step 4. Review"
+say "  역할        $role" "  Role        $role"
+say "  주소        $address/16 (게이트웨이 10.0.0.1)" "  Address     $address/16 (gateway 10.0.0.1)"
+say "  네트워크    $interface" "  Interface   $interface"
+say "  디스크      /dev/$disk" "  Disk        /dev/$disk"
+say "  일련번호·MAC 같은 식별값은 SHA-256 해시로만 저장됩니다." \
+    "  Serials, MAC, and other identifiers are stored only as SHA-256 hashes."
+say "  설치 허용 값은 false 로 저장되어, 이 파일만으로는 디스크를 지울 수 없습니다." \
+    "  Installation stays disabled (false); this file alone cannot erase a disk."
+if [ -e "$target" ]; then
+    say "  주의: $target 이(가) 이미 있습니다. 같은 장비를 다시 수집할 때만 덮어쓰세요." \
+        "  Warning: $target already exists. Replace it only when recapturing the same machine."
+    ask "$(say "덮어쓰려면 overwrite 를 입력하세요:" "Type overwrite to replace it:")"
+    [ "$answer" = overwrite ] || fail "기존 파일을 그대로 두었습니다." "the existing file was kept."
+fi
+ask "$(say "저장하려면 $role 을(를) 입력하세요:" "Type $role to save:")"
+[ "$answer" = "$role" ] || fail "확인 값이 달라 저장하지 않았습니다." \
+    "confirmation did not match. Nothing was saved."
+
+expected=$(sha256sum "$staged" | awk '{print $1}')
+mv -f "$staged" "$target"
+staged=
+"$sync_command"
+[ "$(sha256sum "$target" | awk '{print $1}')" = "$expected" ] ||
+    fail "저장한 파일을 다시 읽었더니 내용이 다릅니다. USB 를 확인하세요." \
+        "the saved file read back differently. Check the USB."
+
+echo
+say "저장했습니다: $target" "Saved: $target"
+captured=
+for file in "$output_dir"/inventory-dns0[123].conf; do
+    [ -e "$file" ] || continue
+    name=${file##*/inventory-}
+    captured="$captured ${name%.conf}"
+done
+say "수집된 역할:$captured" "Captured roles:$captured"
+say "이 장비를 끄고 다음 장비에서 반복하세요. 끄기 전에: sudo umount $output_dir" \
+    "Power this machine off and repeat on the next one. Before that: sudo umount $output_dir"

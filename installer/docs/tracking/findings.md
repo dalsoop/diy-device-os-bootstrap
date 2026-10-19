@@ -72,3 +72,13 @@ digest against an authoritative vendor channel when updating entries. This
 cannot be solved by trusting a successful download of the same URL.
 
 
+
+## Inventory wizard cannot show Korean on the Debian Live text console
+
+The pinned Debian Live entry is the `standard` image, which boots to the Linux
+text console. That console's fonts hold at most 512 glyphs and cannot draw
+Hangul, so `tools/dns-inventory` shows English when `TERM=linux` and Korean
+only in a terminal emulator or with `--lang ko`. Showing Korean on the target
+needs a graphical Debian Live entry, or a console such as `kmscon`. Both change
+the locked catalog source and media size, and need a new hash lock and a boot
+test on the HP hardware.
