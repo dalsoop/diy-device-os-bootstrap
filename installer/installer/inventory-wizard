@@ -96,7 +96,8 @@ media_disk() {
 wired_interfaces() {
     for path in "$sys_root"/class/net/*; do
         [ -e "$path/device" ] || continue
-        [ ! -e "$path/wireless" ] && [ ! -e "$path/phy80211" ] || continue
+        [ ! -e "$path/wireless" ] || continue
+        [ ! -e "$path/phy80211" ] || continue
         printf '%s\n' "${path##*/}"
     done
 }
@@ -112,7 +113,8 @@ internal_disks() {
         [ ! -e "$path/partition" ] || continue
         [ "$(first_line "$path/removable")" = 0 ] || continue
         [ "$disk" != "$installer_disk" ] || continue
-        [ -r "$path/device/model" ] && [ -r "$path/device/serial" ] || continue
+        [ -r "$path/device/model" ] || continue
+        [ -r "$path/device/serial" ] || continue
         case "$(readlink -f "$path/device")" in
             */usb*/*) continue ;;
         esac
@@ -189,9 +191,11 @@ staged=$(mktemp "$output_dir/.inventory-$role.XXXXXX")
 sh "$capture" "$role" "$address" "$interface" "/dev/$disk" > "$staged" ||
     fail "하드웨어 정보를 읽지 못했습니다. 위 메시지를 확인하세요." \
         "could not read the hardware identity; see the message above."
-grep -qx "role=$role" "$staged" && grep -qx 'destructive_install_enabled=false' "$staged" ||
+if ! grep -qx "role=$role" "$staged" ||
+    ! grep -qx 'destructive_install_enabled=false' "$staged"; then
     fail "수집 결과가 예상과 다릅니다. 저장하지 않았습니다." \
         "the capture output is unexpected. Nothing was saved."
+fi
 
 say "4단계. 확인" "Step 4. Review"
 say "  역할        $role" "  Role        $role"

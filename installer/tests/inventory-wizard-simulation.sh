@@ -127,7 +127,7 @@ grep -qx "expected_system_serial_sha256=$(sha256_text CZC0000001)" "$saved"
 grep -qx 'expected_disk_min_bytes=512110190592' "$saved"
 ! grep -q -e 'TEST-DISK-01' -e 'CZC0000001' -e '52:54:00:12:34:56' "$saved" ||
     failure "raw identity reached the inventory file"
-[ "$(ls -A "$medium" | sort | tr '\n' ' ')" = 'inventory-dns01.conf tools ' ] ||
+[ "$(find "$medium" -mindepth 1 -maxdepth 1 -exec basename {} \; | sort | tr '\n' ' ')" = 'inventory-dns01.conf tools ' ] ||
     failure "the wizard wrote outside its one inventory file"
 grep -q 'sync' "$temporary/sync.log"
 pass wizard_captures_one_machine_in_korean
