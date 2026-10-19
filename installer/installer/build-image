@@ -39,6 +39,7 @@ command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
 command -v skopeo >/dev/null 2>&1 || fail "skopeo is required"
 command -v git >/dev/null 2>&1 || fail "git is required"
 command -v jq >/dev/null 2>&1 || fail "jq is required"
+command -v dpkg-deb >/dev/null 2>&1 || fail "dpkg-deb is required"
 
 case "$source_repository" in
     https://*) ;;
@@ -211,15 +212,29 @@ jq -n \
     > "$artifact_dir/build-manifest.json"
 
 packages_file=$artifact_dir/debian-packages.txt
-find "$builder_dir/mirror" -type f -name Packages -exec awk '
-    /^Package: / { package=$2 }
-    /^Version: / { if (package != "") print package "=" $2; package="" }
-' {} + 2>/dev/null | LC_ALL=C sort -u > "$packages_file"
+packages_raw=$artifact_dir/.debian-packages.raw
+package_pool=$builder_dir/tmp/cd-build/$CODENAME/CD1/pool
+[ -d "$package_pool" ] || fail "Simple-CDD completed without a package pool"
+find "$package_pool" -type f \( -name '*.deb' -o -name '*.udeb' \) \
+    -exec sh -c '
+        for package_file do
+            package=$(dpkg-deb -f "$package_file" Package)
+            version=$(dpkg-deb -f "$package_file" Version)
+            printf "%s=%s\n" "$package" "$version"
+        done
+    ' sh {} + > "$packages_raw"
+LC_ALL=C sort -u "$packages_raw" > "$packages_file"
+rm -f "$packages_raw"
+[ -s "$packages_file" ] || fail "Debian package inventory is empty"
 
 package_hashes=$artifact_dir/debian-package-sha256s.txt
-find "$builder_dir/mirror" -type f \( -name '*.deb' -o -name '*.udeb' \) \
-    -exec sha256sum {} + 2>/dev/null |
-    sed "s#$builder_dir/mirror/##" | LC_ALL=C sort > "$package_hashes"
+package_hashes_raw=$artifact_dir/.debian-package-sha256s.raw
+find "$package_pool" -type f \( -name '*.deb' -o -name '*.udeb' \) \
+    -exec sha256sum {} + > "$package_hashes_raw"
+sed "s#$package_pool/##" "$package_hashes_raw" > "$package_hashes"
+LC_ALL=C sort -o "$package_hashes" "$package_hashes"
+rm -f "$package_hashes_raw"
+[ -s "$package_hashes" ] || fail "Debian package hash inventory is empty"
 
 jq -n \
     --arg name "dns-appliance-installer-$build_id" \

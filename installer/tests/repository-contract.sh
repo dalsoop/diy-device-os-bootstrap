@@ -95,6 +95,9 @@ grep -q 'simple_cdd_package_sha256' "$repo_root/installer/build-image"
 grep -q 'tailscale-dependency-licenses.md' "$repo_root/installer/build-image"
 grep -q 'licenseDeclared:"NOASSERTION"' "$repo_root/installer/build-image"
 grep -q 'licenseDeclared:"GPL-3.0-only"' "$repo_root/installer/build-image"
+grep -q 'tmp/cd-build/.*CD1/pool' "$repo_root/installer/build-image"
+grep -q 'Debian package inventory is empty' "$repo_root/installer/build-image"
+grep -q 'Debian package hash inventory is empty' "$repo_root/installer/build-image"
 grep -qx 'bind9-dnsutils' "$repo_root/installer/simple-cdd/profiles/dns.packages"
 if grep -qx 'dnsutils' "$repo_root/installer/simple-cdd/profiles/dns.packages"; then
     echo "repository-contract: use the concrete bind9-dnsutils package, not its virtual dnsutils name" >&2
