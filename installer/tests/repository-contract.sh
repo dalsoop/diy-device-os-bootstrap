@@ -111,6 +111,7 @@ if grep -qx 'exfatprogs' "$repo_root/installer/simple-cdd/profiles/dns.packages"
     exit 1
 fi
 grep -q 'modprobe_command.*vfat' "$repo_root/installer/scripts/install-gate"
+grep -q 'anna_install_command.*netcfg' "$repo_root/installer/scripts/install-gate"
 grep -q 'mkfs.fat -F 32' "$repo_root/installer/write-usb-linux"
 grep -q 'mkfs.fat -F 32' "$repo_root/usb-media/write-usb-linux"
 if grep -q 'mkfs.exfat' "$repo_root/installer/write-usb-linux" "$repo_root/usb-media/write-usb-linux"; then

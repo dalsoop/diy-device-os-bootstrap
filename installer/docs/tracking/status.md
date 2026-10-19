@@ -20,7 +20,7 @@ check mark does not imply successful physical installation.
 | Pop!_OS entry and Korean guide | Yes | Metadata/source only | Korean installation and Secure Boot |
 | Debian Live diagnostic entry | Yes | Metadata only | Boot and inventory capture |
 | Offline DNS ISO source and immutable locks | Yes | Source validation | Two clean amd64 Debian builds and comparison |
-| Fail-closed HP/NIC/disk install gate | Yes | 31-case isolated rejection and disk-preparation simulation | Rebuilt USB, BIOS, UEFI, Ventoy mapper, physical dns01 rerun |
+| Fail-closed HP/NIC/disk install gate | Yes | 32-case isolated rejection and disk-preparation simulation | Rebuilt USB, BIOS, UEFI, Ventoy mapper, physical dns01 rerun |
 | Retry-safe encrypted first-boot enrollment | Yes | Source contract | Power-loss and real FAT32 fault injection |
 | Three-node Technitium cluster bootstrap | Yes | Source/fixture checks | Live three-node cluster and primary-loss drill |
 | Read/plan/apply DNS command boundary | Yes | Isolated simulation | Approved live canary change and rollback |

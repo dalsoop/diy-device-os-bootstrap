@@ -68,6 +68,12 @@ cat > "$test_root/bin/dns-test-umount" <<'EOF'
 #!/bin/sh
 printf 'umount %s\n' "$*" >> "${DNS_TEST_ENROLLMENT_LOG:?}"
 EOF
+cat > "$test_root/bin/dns-test-anna-install" <<'EOF'
+#!/bin/sh
+printf 'anna-install %s\n' "$*" >> "${DNS_TEST_NETWORK_LOG:?}"
+[ "$*" = netcfg ] || exit 1
+[ "${DNS_TEST_ANNA_INSTALL_FAIL:-0}" != 1 ]
+EOF
 cat > "$test_root/bin/tr" <<'EOF'
 #!/bin/sh
 # SPDX-FileCopyrightText: 2026 dalsoop
@@ -83,7 +89,7 @@ chmod 0755 "$test_root/bin/sha256sum" "$test_root/bin/debconf-set" \
     "$test_root/bin/dns-test-hw-detect" "$test_root/bin/dns-test-uname" \
     "$test_root/bin/dns-test-modprobe" "$test_root/bin/dns-test-blkid" \
     "$test_root/bin/dns-test-mount" "$test_root/bin/dns-test-umount" \
-    "$test_root/bin/tr"
+    "$test_root/bin/dns-test-anna-install" "$test_root/bin/tr"
 
 normalize() {
     LC_ALL=C tr 'abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' |
@@ -209,6 +215,7 @@ run_gate() {
     DNS_INSTALLER_BLKID_COMMAND="$test_root/bin/dns-test-blkid" \
     DNS_INSTALLER_MOUNT_COMMAND="$test_root/bin/dns-test-mount" \
     DNS_INSTALLER_UMOUNT_COMMAND="$test_root/bin/dns-test-umount" \
+    DNS_INSTALLER_ANNA_INSTALL_COMMAND="$test_root/bin/dns-test-anna-install" \
     DNS_TEST_DEBCONF_LOG="$root/debconf.log" \
     DNS_TEST_DISK_LOG="$root/disk.log" \
     DNS_TEST_BLOCKDEV_LOG="$root/blockdev.log" \
@@ -218,6 +225,7 @@ run_gate() {
     DNS_TEST_ENROLLMENT_LOG="$root/enrollment.log" \
     DNS_TEST_ENROLLMENT_DEVICE="${DNS_TEST_ENROLLMENT_DEVICE:-/dev/test-enrollment}" \
     DNS_TEST_MODPROBE_FAIL="${DNS_TEST_MODPROBE_FAIL:-0}" \
+    DNS_TEST_ANNA_INSTALL_FAIL="${DNS_TEST_ANNA_INSTALL_FAIL:-0}" \
     PATH="$test_root/bin:$PATH" \
         /bin/sh "$gate" "$phase"
 }
@@ -270,6 +278,10 @@ grep -q '^mount -o ro,nodev,nosuid,noexec /dev/test-enrollment ' "$root/enrollme
 root=$(make_fixture missing-fat32-module)
 DNS_TEST_ENROLLMENT_DIR='' DNS_TEST_MODPROBE_FAIL=1 \
     expect_failure missing_fat32_module_is_blocked "$root"
+
+root=$(make_fixture missing-network-questions)
+DNS_TEST_ANNA_INSTALL_FAIL=1 \
+    expect_failure missing_network_questions_are_blocked "$root"
 
 root=$(make_fixture missing-network-driver)
 rm -rf "$root/sys/class/net/en0"
@@ -434,4 +446,4 @@ authorize_erase=true
 EOF
 expect_failure stale_reinstall_token_is_blocked "$root"
 
-printf 'RESULT 31/31 install-gate simulations passed\n'
+printf 'RESULT 32/32 install-gate simulations passed\n'

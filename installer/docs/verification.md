@@ -7,7 +7,7 @@ evidence.
 
 ## Automated source gates
 
-- `tests/install-gate-simulation.sh` passes all 31 cases, including direct
+- `tests/install-gate-simulation.sh` passes all 32 cases, including direct
   partition media, Ventoy's `/dev/mapper/Ventoy` ancestry, ambiguous and cyclic
   ancestry, fixed-bit USB targets, direct and indirect mounts, active swap,
   holders, and zero writes on every rejection.

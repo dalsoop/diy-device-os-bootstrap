@@ -21,6 +21,7 @@ modprobe_command=${DNS_INSTALLER_MODPROBE_COMMAND:-modprobe}
 blkid_command=${DNS_INSTALLER_BLKID_COMMAND:-blkid}
 mount_command=${DNS_INSTALLER_MOUNT_COMMAND:-mount}
 umount_command=${DNS_INSTALLER_UMOUNT_COMMAND:-umount}
+anna_install_command=${DNS_INSTALLER_ANNA_INSTALL_COMMAND:-anna-install}
 state_file=$state_dir/install.env
 
 fail() {
@@ -49,6 +50,11 @@ read_first_line() {
 
 set_debconf() {
     "$debconf_set_command" "$@"
+}
+
+ensure_network_questions() {
+    command -v "$anna_install_command" >/dev/null 2>&1 || fail "$anna_install_command is required"
+    "$anna_install_command" netcfg || fail "cannot load installer network questions"
 }
 
 network_device_present() {
@@ -184,6 +190,7 @@ match_node() {
     done
 
     check_reinstall_permission
+    ensure_network_questions
 
     mkdir -p "$state_dir"
     {

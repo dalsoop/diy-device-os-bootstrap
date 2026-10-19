@@ -3,13 +3,15 @@
 `install-gate-simulation.sh` runs the destructive-selection gate against an
 isolated fake sysfs tree. It never opens a real block device.
 
-The 31-case simulation covers:
+The 32-case simulation covers:
 
 - one exact HP/NIC/disk match selecting `/dev/sda`;
 - loading the exact installer-kernel NIC module package when no NIC is visible,
   while rejecting missing or ambiguous packages;
 - loading FAT32 support and mounting an attached enrollment filesystem, while
   rejecting a failed filesystem-module load;
+- loading the installer network questions before dynamic preseed values, while
+  rejecting a failed `netcfg` udeb load;
 - wrong DMI identity stopping before selection;
 - an erase-disabled role stopping before selection;
 - two matching internal disks stopping as ambiguous;

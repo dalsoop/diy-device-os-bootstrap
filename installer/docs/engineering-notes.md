@@ -100,6 +100,15 @@ Response: format `DNS-ENROLL` as FAT32 and explicitly load `vfat` before the
 gate mounts it. Keep the 11-character label limit and test both module-load
 success and failure before any target write.
 
+Symptom: the early installer gate matches hardware and enrollment but exits 10
+while setting `netcfg/choose_interface`.
+
+Cause: the preseed early command runs before the `netcfg` udeb has registered
+its debconf questions.
+
+Response: install `netcfg` with `anna-install` before setting dynamic network
+answers, and fail before disk selection if that component cannot be loaded.
+
 Symptom: the expected target is rejected as active even though `/dev/sda` is
 not listed directly in `/proc/mounts`.
 
