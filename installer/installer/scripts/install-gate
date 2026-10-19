@@ -215,7 +215,6 @@ match_node() {
     set_debconf netcfg/get_netmask "$NETMASK"
     set_debconf netcfg/get_gateway "$GATEWAY"
     set_debconf netcfg/get_nameservers "$DNS_SERVERS"
-    set_debconf netcfg/confirm_static true
 }
 
 check_reinstall_permission() {

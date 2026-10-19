@@ -109,6 +109,16 @@ its debconf questions.
 Response: install `netcfg` with `anna-install` before setting dynamic network
 answers, and fail before disk selection if that component cannot be loaded.
 
+Symptom: the early installer gate loads `netcfg` and sets all address fields but
+still exits 10 immediately afterward.
+
+Cause: `netcfg/confirm_static` is not a registered Debian Installer question;
+`debconf-set` returns 10 for the unknown key.
+
+Response: do not set the nonexistent confirmation key. Keep the installer-gate
+simulation's debconf stub limited to registered keys so this fails in source
+tests instead of during an ISO boot.
+
 Symptom: the expected target is rejected as active even though `/dev/sda` is
 not listed directly in `/proc/mounts`.
 

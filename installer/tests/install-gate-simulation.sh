@@ -20,6 +20,12 @@ EOF
 cat > "$test_root/bin/debconf-set" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "${DNS_TEST_DEBCONF_LOG:?}"
+case "${1:-}" in
+    netcfg/choose_interface|netcfg/get_hostname|netcfg/get_domain|\
+    netcfg/get_ipaddress|netcfg/get_netmask|netcfg/get_gateway|\
+    netcfg/get_nameservers|partman-auto/disk) ;;
+    *) exit 10 ;;
+esac
 EOF
 cat > "$test_root/bin/dns-test-dd" <<'EOF'
 #!/bin/sh
@@ -269,6 +275,10 @@ expect_failure() {
 
 root=$(make_fixture valid)
 expect_success valid_exact_match "$root"
+if grep -q '^netcfg/confirm_static ' "$root/debconf.log"; then
+    printf 'FAIL valid_exact_match set an unregistered netcfg question\n' >&2
+    exit 1
+fi
 
 root=$(make_fixture attached-enrollment)
 DNS_TEST_ENROLLMENT_DIR='' expect_success attached_fat32_enrollment_is_mounted "$root"
