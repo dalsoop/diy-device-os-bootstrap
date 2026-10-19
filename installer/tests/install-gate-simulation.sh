@@ -48,13 +48,23 @@ cat > "$test_root/bin/dns-test-uname" <<'EOF'
 [ "${1:-}" = -r ] || exit 1
 printf 'test-kernel\n'
 EOF
+cat > "$test_root/bin/tr" <<'EOF'
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+if [ "${1:-}" = '[:lower:]' ] && [ "${2:-}" = '[:upper:]' ]; then
+    exec /usr/bin/tr o p
+fi
+exec /usr/bin/tr "$@"
+EOF
 chmod 0755 "$test_root/bin/sha256sum" "$test_root/bin/debconf-set" \
     "$test_root/bin/dns-test-dd" "$test_root/bin/dns-test-blockdev" \
     "$test_root/bin/dns-test-sync" "$test_root/bin/dns-test-udpkg" \
-    "$test_root/bin/dns-test-hw-detect" "$test_root/bin/dns-test-uname"
+    "$test_root/bin/dns-test-hw-detect" "$test_root/bin/dns-test-uname" \
+    "$test_root/bin/tr"
 
 normalize() {
-    LC_ALL=C tr '[:lower:]' '[:upper:]' |
+    LC_ALL=C tr 'abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' |
         sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 

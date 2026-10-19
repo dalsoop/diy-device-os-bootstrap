@@ -79,6 +79,17 @@ Response: inspect the reported mismatch from a trusted live environment.
 Recapture inventory only when hardware was intentionally changed. Never edit a
 hash merely to make the gate pass.
 
+Symptom: mixed-case DMI values visibly match inventory, but the installer gate
+reports that no inventory entry matched.
+
+Cause: the Debian Installer BusyBox `tr` treats `[:lower:]` and `[:upper:]` as
+literal character lists, unlike GNU `tr`, so normalization can change letters
+without uppercasing them.
+
+Response: normalize with explicit ASCII lowercase and uppercase alphabets. Keep
+the simulation's `tr` compatibility shim so GNU-hosted tests reject the
+non-portable character-class form, and repeat a disposable BIOS boot.
+
 Symptom: the expected target is rejected as active even though `/dev/sda` is
 not listed directly in `/proc/mounts`.
 
