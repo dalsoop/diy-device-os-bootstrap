@@ -17,15 +17,30 @@ if [ -x /usr/bin/sha256sum ]; then
 fi
 exec shasum -a 256 "$@"
 EOF
+# During preseed/early_command the netcfg static-address questions are not
+# registered yet, so debconf-set exits 10 for them on a real installer.
 cat > "$test_root/bin/debconf-set" <<'EOF'
 #!/bin/sh
-printf '%s\n' "$*" >> "${DNS_TEST_DEBCONF_LOG:?}"
-case "${1:-}" in
-    netcfg/choose_interface|netcfg/get_hostname|netcfg/get_domain|\
-    netcfg/get_ipaddress|netcfg/get_netmask|netcfg/get_gateway|\
-    netcfg/get_nameservers|partman-auto/disk) ;;
-    *) exit 10 ;;
-esac
+printf 'debconf-set %s\n' "$*" >> "${DNS_TEST_DEBCONF_LOG:?}"
+exit 10
+EOF
+cat > "$test_root/bin/debconf-set-selections" <<'EOF'
+#!/bin/sh
+[ "${DNS_TEST_SELECTIONS_FAIL:-0}" != 1 ] || exit 1
+while IFS=' ' read -r owner key type value; do
+    [ "$owner" = d-i ] || exit 1
+    case "$type" in
+        select|string) ;;
+        *) exit 1 ;;
+    esac
+    case "$key" in
+        netcfg/choose_interface|netcfg/get_hostname|netcfg/get_domain|\
+        netcfg/get_ipaddress|netcfg/get_netmask|netcfg/get_gateway|\
+        netcfg/get_nameservers|partman-auto/disk) ;;
+        *) exit 1 ;;
+    esac
+    printf '%s %s\n' "$key" "$value" >> "${DNS_TEST_DEBCONF_LOG:?}"
+done
 EOF
 cat > "$test_root/bin/dns-test-dd" <<'EOF'
 #!/bin/sh
@@ -74,12 +89,6 @@ cat > "$test_root/bin/dns-test-umount" <<'EOF'
 #!/bin/sh
 printf 'umount %s\n' "$*" >> "${DNS_TEST_ENROLLMENT_LOG:?}"
 EOF
-cat > "$test_root/bin/dns-test-anna-install" <<'EOF'
-#!/bin/sh
-printf 'anna-install %s\n' "$*" >> "${DNS_TEST_NETWORK_LOG:?}"
-[ "$*" = netcfg ] || exit 1
-[ "${DNS_TEST_ANNA_INSTALL_FAIL:-0}" != 1 ]
-EOF
 cat > "$test_root/bin/tr" <<'EOF'
 #!/bin/sh
 # SPDX-FileCopyrightText: 2026 dalsoop
@@ -90,12 +99,13 @@ fi
 exec /usr/bin/tr "$@"
 EOF
 chmod 0755 "$test_root/bin/sha256sum" "$test_root/bin/debconf-set" \
+    "$test_root/bin/debconf-set-selections" \
     "$test_root/bin/dns-test-dd" "$test_root/bin/dns-test-blockdev" \
     "$test_root/bin/dns-test-sync" "$test_root/bin/dns-test-udpkg" \
     "$test_root/bin/dns-test-hw-detect" "$test_root/bin/dns-test-uname" \
     "$test_root/bin/dns-test-modprobe" "$test_root/bin/dns-test-blkid" \
     "$test_root/bin/dns-test-mount" "$test_root/bin/dns-test-umount" \
-    "$test_root/bin/dns-test-anna-install" "$test_root/bin/tr"
+    "$test_root/bin/tr"
 
 normalize() {
     LC_ALL=C tr 'abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' |
@@ -207,7 +217,7 @@ run_gate() {
     DNS_INSTALLER_SYS_ROOT="$root/sys" \
     DNS_INSTALLER_MOUNTS_FILE="$root/mounts" \
     DNS_INSTALLER_SWAPS_FILE="$root/swaps" \
-    DNS_INSTALLER_DEBCONF_SET="$test_root/bin/debconf-set" \
+    DNS_INSTALLER_DEBCONF_SET_SELECTIONS="$test_root/bin/debconf-set-selections" \
     DNS_INSTALLER_ENROLLMENT_DIR="$enrollment_dir" \
     DNS_INSTALLER_DEVICE_ROOT="$root/dev" \
     DNS_INSTALLER_ZERO_COMMAND="$test_root/bin/dns-test-dd" \
@@ -221,7 +231,6 @@ run_gate() {
     DNS_INSTALLER_BLKID_COMMAND="$test_root/bin/dns-test-blkid" \
     DNS_INSTALLER_MOUNT_COMMAND="$test_root/bin/dns-test-mount" \
     DNS_INSTALLER_UMOUNT_COMMAND="$test_root/bin/dns-test-umount" \
-    DNS_INSTALLER_ANNA_INSTALL_COMMAND="$test_root/bin/dns-test-anna-install" \
     DNS_TEST_DEBCONF_LOG="$root/debconf.log" \
     DNS_TEST_DISK_LOG="$root/disk.log" \
     DNS_TEST_BLOCKDEV_LOG="$root/blockdev.log" \
@@ -231,7 +240,7 @@ run_gate() {
     DNS_TEST_ENROLLMENT_LOG="$root/enrollment.log" \
     DNS_TEST_ENROLLMENT_DEVICE="${DNS_TEST_ENROLLMENT_DEVICE:-/dev/test-enrollment}" \
     DNS_TEST_MODPROBE_FAIL="${DNS_TEST_MODPROBE_FAIL:-0}" \
-    DNS_TEST_ANNA_INSTALL_FAIL="${DNS_TEST_ANNA_INSTALL_FAIL:-0}" \
+    DNS_TEST_SELECTIONS_FAIL="${DNS_TEST_SELECTIONS_FAIL:-0}" \
     PATH="$test_root/bin:$PATH" \
         /bin/sh "$gate" "$phase"
 }
@@ -279,6 +288,17 @@ if grep -q '^netcfg/confirm_static ' "$root/debconf.log"; then
     printf 'FAIL valid_exact_match set an unregistered netcfg question\n' >&2
     exit 1
 fi
+if grep -q '^debconf-set ' "$root/debconf.log"; then
+    printf 'FAIL valid_exact_match used debconf-set before netcfg registered its questions\n' >&2
+    exit 1
+fi
+for answer in 'netcfg/choose_interface en0' 'netcfg/get_ipaddress ' \
+    'netcfg/get_netmask ' 'netcfg/get_gateway ' 'netcfg/get_nameservers '; do
+    grep -q "^$answer" "$root/debconf.log" || {
+        printf 'FAIL valid_exact_match did not preseed %s\n' "$answer" >&2
+        exit 1
+    }
+done
 
 root=$(make_fixture attached-enrollment)
 DNS_TEST_ENROLLMENT_DIR='' expect_success attached_fat32_enrollment_is_mounted "$root"
@@ -289,9 +309,9 @@ root=$(make_fixture missing-fat32-module)
 DNS_TEST_ENROLLMENT_DIR='' DNS_TEST_MODPROBE_FAIL=1 \
     expect_failure missing_fat32_module_is_blocked "$root"
 
-root=$(make_fixture missing-network-questions)
-DNS_TEST_ANNA_INSTALL_FAIL=1 \
-    expect_failure missing_network_questions_are_blocked "$root"
+root=$(make_fixture rejected-preseed-answers)
+DNS_TEST_SELECTIONS_FAIL=1 \
+    expect_failure rejected_preseed_answers_are_blocked "$root"
 
 root=$(make_fixture missing-network-driver)
 rm -rf "$root/sys/class/net/en0"

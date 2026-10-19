@@ -119,6 +119,19 @@ Response: do not set the nonexistent confirmation key. Keep the installer-gate
 simulation's debconf stub limited to registered keys so this fails in source
 tests instead of during an ISO boot.
 
+Symptom: the early installer gate loads `netcfg` and sets the interface,
+hostname, and domain, but exits 10 at `netcfg/get_ipaddress` during a BIOS VM
+install.
+
+Cause: `debconf-set` only changes registered questions. During
+`preseed/early_command` the static-address questions are not registered yet,
+even after `anna-install netcfg` queues the udeb.
+
+Response: write every dynamic answer as a typed `d-i` line to
+`debconf-set-selections`, which registers missing questions like a preseed
+file does. The simulation's `debconf-set` stub always exits 10 so a regression
+to it fails in source tests.
+
 Symptom: the expected target is rejected as active even though `/dev/sda` is
 not listed directly in `/proc/mounts`.
 

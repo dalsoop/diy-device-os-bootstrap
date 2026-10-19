@@ -10,8 +10,8 @@ The 32-case simulation covers:
   while rejecting missing or ambiguous packages;
 - loading FAT32 support and mounting an attached enrollment filesystem, while
   rejecting a failed filesystem-module load;
-- loading the installer network questions before dynamic preseed values, while
-  rejecting a failed `netcfg` udeb load;
+- preseeding dynamic network and disk answers through `debconf-set-selections`
+  without relying on `debconf-set`, while rejecting a failed preseed write;
 - wrong DMI identity stopping before selection;
 - an erase-disabled role stopping before selection;
 - two matching internal disks stopping as ambiguous;

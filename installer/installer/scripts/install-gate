@@ -8,7 +8,7 @@ state_dir=${DNS_INSTALLER_STATE_DIR:-/run/dns-appliance}
 sys_root=${DNS_INSTALLER_SYS_ROOT:-/sys}
 mounts_file=${DNS_INSTALLER_MOUNTS_FILE:-/proc/mounts}
 swaps_file=${DNS_INSTALLER_SWAPS_FILE:-/proc/swaps}
-debconf_set_command=${DNS_INSTALLER_DEBCONF_SET:-debconf-set}
+debconf_selections_command=${DNS_INSTALLER_DEBCONF_SET_SELECTIONS:-debconf-set-selections}
 device_root=${DNS_INSTALLER_DEVICE_ROOT:-/dev}
 zero_command=${DNS_INSTALLER_ZERO_COMMAND:-dd}
 blockdev_command=${DNS_INSTALLER_BLOCKDEV_COMMAND:-blockdev}
@@ -21,7 +21,6 @@ modprobe_command=${DNS_INSTALLER_MODPROBE_COMMAND:-modprobe}
 blkid_command=${DNS_INSTALLER_BLKID_COMMAND:-blkid}
 mount_command=${DNS_INSTALLER_MOUNT_COMMAND:-mount}
 umount_command=${DNS_INSTALLER_UMOUNT_COMMAND:-umount}
-anna_install_command=${DNS_INSTALLER_ANNA_INSTALL_COMMAND:-anna-install}
 state_file=$state_dir/install.env
 
 fail() {
@@ -48,13 +47,19 @@ read_first_line() {
     sed -n '1p' "$file"
 }
 
-set_debconf() {
-    "$debconf_set_command" "$@"
-}
-
-ensure_network_questions() {
-    command -v "$anna_install_command" >/dev/null 2>&1 || fail "$anna_install_command is required"
-    "$anna_install_command" netcfg || fail "cannot load installer network questions"
+# Preseed answers through debconf-set-selections. Unlike debconf-set, it
+# registers questions whose owning udeb has not loaded yet, which is the case
+# for netcfg during preseed/early_command.
+preseed_answer() {
+    key=$1
+    type=$2
+    value=$3
+    case "$value" in
+        *"
+"*) fail "preseed value for $key contains a newline" ;;
+    esac
+    printf 'd-i %s %s %s\n' "$key" "$type" "$value" | "$debconf_selections_command" ||
+        fail "cannot preseed $key"
 }
 
 network_device_present() {
@@ -190,7 +195,6 @@ match_node() {
     done
 
     check_reinstall_permission
-    ensure_network_questions
 
     mkdir -p "$state_dir"
     {
@@ -208,13 +212,13 @@ match_node() {
         printf 'NIC_MAC=%s\n' "$NIC_MAC"
     } > "$state_file"
 
-    set_debconf netcfg/choose_interface "$NIC_NAME"
-    set_debconf netcfg/get_hostname "$ROLE"
-    set_debconf netcfg/get_domain "$DOMAIN"
-    set_debconf netcfg/get_ipaddress "$ADDRESS"
-    set_debconf netcfg/get_netmask "$NETMASK"
-    set_debconf netcfg/get_gateway "$GATEWAY"
-    set_debconf netcfg/get_nameservers "$DNS_SERVERS"
+    preseed_answer netcfg/choose_interface select "$NIC_NAME"
+    preseed_answer netcfg/get_hostname string "$ROLE"
+    preseed_answer netcfg/get_domain string "$DOMAIN"
+    preseed_answer netcfg/get_ipaddress string "$ADDRESS"
+    preseed_answer netcfg/get_netmask string "$NETMASK"
+    preseed_answer netcfg/get_gateway string "$GATEWAY"
+    preseed_answer netcfg/get_nameservers string "$DNS_SERVERS"
 }
 
 check_reinstall_permission() {
@@ -517,7 +521,7 @@ match_disk() {
         printf 'TARGET_DISK_SERIAL=%s\n' "$(read_first_line "$sys_root/class/block/$matched_name/device/serial")"
         printf 'TARGET_DISK_PREPARED=true\n'
     } >> "$state_file"
-    set_debconf partman-auto/disk "$matched_disk"
+    preseed_answer partman-auto/disk string "$matched_disk"
 }
 
 case "${1:-}" in
