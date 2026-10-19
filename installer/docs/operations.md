@@ -167,11 +167,12 @@ the absence of DNS, route, exit-node, and SSH authority are verified.
 
 ## DNS changes and rollback
 
-Use `installer/management/dnsctl health`, then create and review a machine-readable
-plan. Apply with a caller-supplied commit equal to current `HEAD`, a clean zone
-file, and explicit confirmation. Because the command does not consume the saved
-plan or prove pull-request approval, the operator must compare the reviewed
-plan and verify approval immediately before apply. Change one logical zone
+Use `installer/management/dnsctl health`, then save a plan with
+`dnsctl plan installer/zones/home.arpa.zone --out <new-file>` from a clean
+checkout of the reviewed commit, and review it. Apply with
+`dnsctl apply --plan <file> --plan-sha256 <sha256> --confirm APPLY`. If apply
+reports drift, a different commit, or a replay, make and review a new plan.
+Verify pull-request approval before apply; the command does not prove it. Change one logical zone
 operation at a time and query the canary over UDP and TCP.
 
 Router DHCP DNS changes occur last. Record old values, retain a wired recovery

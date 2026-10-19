@@ -29,7 +29,7 @@ inventory, disk, and reinstall-authorization gates.
 Agent credentials are separate reader, planner, and applier token files outside
 Git. Token values never enter MCP arguments, URLs, command arguments, or output.
 DNS apply is host-disabled by default and, when enabled, still requires a
-target-specific phrase, exact checked-out commit, clean tracked zone, and the
-delegated `dnsctl` gate. The Agent Gateway additionally requires a trusted
+target-specific phrase naming one saved plan's SHA-256, and the delegated
+`dnsctl` gate, which rejects drift since that plan and replays. The Agent Gateway additionally requires a trusted
 Technitium CA file for writes and will not use bootstrap-only insecure TLS for
 an apply call.

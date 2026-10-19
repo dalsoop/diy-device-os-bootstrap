@@ -52,9 +52,9 @@ fails before any signature is cleared. A completed role also needs a token
 bound to its current generation and system UUID hash.
 
 Restore requires the exact target URL in `RESTORE <url>`. DNS apply requires
-literal `APPLY`, a caller-supplied commit equal to `HEAD`, and a clean zone
-file. The command does not prove review approval or consume a saved plan; those
-remain operator gates. Confirmations are not substitutes for target inspection.
+literal `APPLY` and the SHA-256 of one saved plan, and rejects target, commit,
+zone-file, and live-zone drift and replays. The command does not prove review
+approval; that remains an operator gate. Confirmations are not substitutes for target inspection.
 
 ## Identities and privilege
 
@@ -94,9 +94,11 @@ complete trusted TLS configuration before enabling agent writes.
 - Git commits and pull requests are the durable review record for desired state,
   source locks, and configuration changes.
 - `dnsctl` appends redacted JSONL for completed plan operations and apply API
-  outcomes. Confirmation, commit, dirty-zone, and transport failures can exit
-  before an audit event is written. The log does not prove that a saved plan was
-  reviewed or a pull request was approved.
+  outcomes with the plan's `plan_sha256`, and apply reads it to reject replays.
+  Confirmation, hash, commit, dirty-zone, and transport failures can exit
+  before an audit event is written; live-zone drift is recorded as `drifted`.
+  The log does not prove that a plan was reviewed or a pull request was
+  approved.
 - DNS installation writes `public.json`, a sanitized install log, `COMPLETE`,
   and `ACTIVE` to the enrollment partition; the host also retains install facts.
 - The DIY Device OS USB carries the resolved Catalog and checksum manifests,

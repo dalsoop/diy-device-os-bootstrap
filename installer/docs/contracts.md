@@ -169,11 +169,26 @@ and matching system UUID hash.
 
 ## DNS desired state and apply
 
-The zone file is Git-owned desired state. `dnsctl plan` reports current and
-desired hashes plus a human diff. `dnsctl apply` requires literal `APPLY`, a
-caller-supplied commit equal to current `HEAD`, and a clean zone file. It does
-not consume a saved plan, prove pull-request approval, or require every file in
-the checkout to be clean. It emits redacted JSONL audit events and does not
+The zone file is Git-owned desired state. `dnsctl plan` prints a plan and a
+human diff. The plan is a JSON object with `schema_version` 2, `created_at`,
+`zone`, `target_url`, `source_commit`, `zone_path` (relative to the Git work
+tree), `current_sha256`, `desired_sha256`, and `changed`. `source_commit` and
+`zone_path` are null when the zone file is untracked or modified.
+
+`dnsctl plan --out <path>` saves that object once, mode 0444, through a hard
+link that never replaces an existing name, and prints
+`dnsctl: plan_sha256=<sha256>` on stderr. It refuses a modified zone.
+
+`dnsctl apply --plan <path> --plan-sha256 <sha256> --confirm APPLY` hashes one
+private copy of the plan and applies only when all of these hold: the hash
+matches; the plan is a saved schema version 2 plan; `TECHNITIUM_URL` equals
+`target_url`; `HEAD` equals `source_commit`; the zone file is tracked,
+unmodified, and hashes to `desired_sha256`; the live zone still hashes to
+`current_sha256`; and the audit log has no successful apply of the same
+`plan_sha256`. A plan with `changed` false returns `{"status":"unchanged"}`
+without writing. Success prints `{status, plan_sha256, response}`. The command
+does not prove pull-request approval or require unrelated checkout files to be
+clean. It emits redacted JSONL audit events with `plan_sha256` and does not
 expose credentials in arguments, URLs, or logs.
 `TECHNITIUM_CA_FILE` selects a reviewed CA bundle instead of bootstrap-only
 insecure TLS. The Agent Gateway requires that trusted mode for apply.

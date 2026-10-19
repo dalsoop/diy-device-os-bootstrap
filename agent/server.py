@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import os
@@ -26,7 +27,7 @@ ROLES: tuple[Role, ...] = ("dns01", "dns02", "dns03")
 Media = Literal["dns-bootstrap", "inventory-capture"]
 MEDIA: tuple[Media, ...] = ("dns-bootstrap", "inventory-capture")
 CAPACITY_PATTERN = re.compile(r"^[1-9][0-9]*(?:\.[0-9]+)?(?:GB|GiB|TB|TiB)$")
-COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+PLAN_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 MAX_OUTPUT_BYTES = 64 * 1024
 
 
@@ -347,35 +348,63 @@ class Gateway:
             extra_environment=environment,
         )
 
+    @property
+    def plan_dir(self) -> Path:
+        return self.state_dir / "dns-plans"
+
     def dns_plan(self, role: str) -> dict[str, object]:
+        """Save an immutable plan and name it by the SHA-256 of its bytes."""
         environment = self._dns_environment(role, "planner")
-        return self._run(
-            f"dns.plan.{role}",
-            [str(self.management / "dnsctl"), "plan", str(self.zone_file)],
-            timeout=60,
-            extra_environment=environment,
-        )
+        self.plan_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix="plan-", dir=self.plan_dir))
+        try:
+            staged = staging / "plan.json"
+            result = self._run(
+                f"dns.plan.{role}",
+                [
+                    str(self.management / "dnsctl"),
+                    "plan",
+                    str(self.zone_file),
+                    "--out",
+                    str(staged),
+                ],
+                timeout=60,
+                extra_environment=environment,
+            )
+            plan_sha256 = hashlib.sha256(staged.read_bytes()).hexdigest()
+            try:
+                os.link(staged, self.plan_dir / f"{plan_sha256}.json")
+            except FileExistsError:
+                pass
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        result["plan_sha256"] = plan_sha256
+        return result
 
     def dns_apply(
-        self, role: str, approved_commit: str, confirmation: str
+        self, role: str, plan_sha256: str, confirmation: str
     ) -> dict[str, object]:
         validated_role = self._validate_role(role)
         if os.environ.get("DEVICE_OS_AGENT_ALLOW_APPLY") != "1":
             raise ToolError("dns.apply: disabled on this management host")
-        if not COMMIT_PATTERN.fullmatch(approved_commit):
-            raise ToolError("dns.apply: approved_commit must be a full lowercase commit ID")
-        expected = f"APPLY home.arpa TO {validated_role} AT {approved_commit}"
+        if not PLAN_SHA256_PATTERN.fullmatch(plan_sha256):
+            raise ToolError("dns.apply: plan_sha256 must be a lowercase SHA-256 from dns_plan")
+        expected = f"APPLY home.arpa TO {validated_role} PLAN {plan_sha256}"
         if confirmation != expected:
             raise ToolError(f"dns.apply: confirmation must exactly equal {expected}")
+        plan_file = self.plan_dir / f"{plan_sha256}.json"
+        if not plan_file.is_file():
+            raise ToolError("dns.apply: no saved plan has that plan_sha256")
         environment = self._dns_environment(validated_role, "applier")
         return self._run(
             f"dns.apply.{validated_role}",
             [
                 str(self.management / "dnsctl"),
                 "apply",
-                str(self.zone_file),
-                "--approved-commit",
-                approved_commit,
+                "--plan",
+                str(plan_file),
+                "--plan-sha256",
+                plan_sha256,
                 "--confirm",
                 "APPLY",
             ],
@@ -466,7 +495,7 @@ def dns_health(role: Role) -> dict[str, object]:
 
 @mcp.tool(annotations=READ_ONLY_NETWORK, structured_output=True)
 def dns_plan(role: Role) -> dict[str, object]:
-    """Compare the tracked home.arpa zone with one node without applying it."""
+    """Save an immutable home.arpa plan for one node and return its plan_sha256."""
     return gateway.dns_plan(role)
 
 
@@ -480,10 +509,10 @@ def dns_plan(role: Role) -> dict[str, object]:
     structured_output=True,
 )
 def dns_apply(
-    role: Role, approved_commit: str, confirmation: str
+    role: Role, plan_sha256: str, confirmation: str
 ) -> dict[str, object]:
-    """Apply the tracked zone when host policy and all delegated gates allow it."""
-    return gateway.dns_apply(role, approved_commit, confirmation)
+    """Apply one reviewed saved plan when host policy and all delegated gates allow it."""
+    return gateway.dns_apply(role, plan_sha256, confirmation)
 
 
 def main() -> None:

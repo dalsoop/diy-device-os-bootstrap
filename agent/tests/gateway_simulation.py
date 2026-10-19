@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.util
 import json
 import os
@@ -127,6 +128,10 @@ def main() -> None:
             "python3 - \"$@\" <<'PY'\n"
             "import json, os, sys\n"
             f"json.dump({{'argv': sys.argv[1:], 'env': {{k: v for k, v in os.environ.items() if k.startswith('TECHNITIUM_')}}, 'has_openai_key': 'OPENAI_API_KEY' in os.environ}}, open({str(invocation)!r}, 'w'))\n"
+            "if '--out' in sys.argv:\n"
+            "    out = sys.argv[sys.argv.index('--out') + 1]\n"
+            "    assert not os.path.exists(out)\n"
+            "    open(out, 'w').write('{\"schema_version\":2,\"changed\":true}\\n')\n"
             "print('{\"status\":\"ok\"}')\n"
             "PY\n",
         )
@@ -138,6 +143,7 @@ def main() -> None:
             "printf '%s\\n' '{\"BackendState\":\"Running\",\"Self\":{\"HostName\":\"management\"},\"Peer\":{\"a\":{\"HostName\":\"dns01\",\"Online\":true,\"TailscaleIPs\":[\"100.64.0.1\"]},\"b\":{\"HostName\":\"unrelated\",\"Online\":true,\"TailscaleIPs\":[\"100.64.0.9\"]}}}'\n",
         )
 
+        os.environ["DEVICE_OS_AGENT_STATE_DIR"] = str(root / "state")
         server.gateway = server.Gateway(root)
         result = server.gateway.world_validate()
         assert result["ok"] is True
@@ -178,39 +184,54 @@ def main() -> None:
         tunnel = server.gateway.tunnel_status()
         assert set(tunnel["data"]["dns_nodes"]) == {"dns01"}
 
-        commit = "a" * 40
+        os.environ["DEVICE_OS_AGENT_DNS_PLANNER_TOKEN_FILE"] = str(token)
         os.environ["DEVICE_OS_AGENT_DNS_APPLIER_TOKEN_FILE"] = str(token)
         os.environ["DEVICE_OS_AGENT_DNS01_URL"] = "https://dns01:53443"
         os.environ["DEVICE_OS_AGENT_TECHNITIUM_CA_FILE"] = str(ca_file)
         os.environ["OPENAI_API_KEY"] = "must-not-reach-child"
+        planned = server.gateway.dns_plan("dns01")
+        plan_sha256 = planned["plan_sha256"]
+        saved_plan = root / "state" / "dns-plans" / f"{plan_sha256}.json"
+        assert hashlib.sha256(saved_plan.read_bytes()).hexdigest() == plan_sha256
+        assert json.loads(invocation.read_text(encoding="utf-8"))["argv"][-2] == "--out"
+        assert [path.name for path in saved_plan.parent.iterdir()] == [saved_plan.name]
+        confirmation = f"APPLY home.arpa TO dns01 PLAN {plan_sha256}"
         os.environ.pop("DEVICE_OS_AGENT_ALLOW_APPLY", None)
         expect_tool_error(
-            lambda: server.gateway.dns_apply(
-                "dns01", commit, f"APPLY home.arpa TO dns01 AT {commit}"
-            ),
+            lambda: server.gateway.dns_apply("dns01", plan_sha256, confirmation),
             "disabled",
         )
         os.environ["DEVICE_OS_AGENT_ALLOW_APPLY"] = "1"
         expect_tool_error(
-            lambda: server.gateway.dns_apply("dns01", commit, "APPLY"),
+            lambda: server.gateway.dns_apply("dns01", plan_sha256, "APPLY"),
             "confirmation must exactly equal",
+        )
+        expect_tool_error(
+            lambda: server.gateway.dns_apply("dns01", "a" * 40, confirmation),
+            "plan_sha256 must be",
+        )
+        unknown = "b" * 64
+        expect_tool_error(
+            lambda: server.gateway.dns_apply(
+                "dns01", unknown, f"APPLY home.arpa TO dns01 PLAN {unknown}"
+            ),
+            "no saved plan",
         )
         token.chmod(0o644)
         expect_tool_error(
-            lambda: server.gateway.dns_apply(
-                "dns01", commit, f"APPLY home.arpa TO dns01 AT {commit}"
-            ),
+            lambda: server.gateway.dns_apply("dns01", plan_sha256, confirmation),
             "must not be accessible by group or others",
         )
         token.chmod(0o600)
-        applied = server.gateway.dns_apply(
-            "dns01", commit, f"APPLY home.arpa TO dns01 AT {commit}"
-        )
+        applied = server.gateway.dns_apply("dns01", plan_sha256, confirmation)
         assert applied["ok"] is True
         recorded = json.loads(invocation.read_text(encoding="utf-8"))
-        assert recorded["argv"][-4:] == [
-            "--approved-commit",
-            commit,
+        assert recorded["argv"] == [
+            "apply",
+            "--plan",
+            str(saved_plan),
+            "--plan-sha256",
+            plan_sha256,
             "--confirm",
             "APPLY",
         ]

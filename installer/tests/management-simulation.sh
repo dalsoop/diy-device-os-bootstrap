@@ -17,8 +17,16 @@ pass() {
 mkdir -p "$temporary/bin"
 cat > "$temporary/bin/curl" <<'EOF'
 #!/bin/sh
-[ -z "${MOCK_CURL_ARGS:-}" ] || printf '%s\n' "$@" > "$MOCK_CURL_ARGS"
-cat "$MOCK_CURRENT_ZONE"
+case "$*" in
+    */api/zones/import*)
+        printf '%s\n' "$*" >> "${MOCK_IMPORT_LOG:-/dev/null}"
+        printf '{"status":"ok","response":{}}\n'
+        ;;
+    *)
+        [ -z "${MOCK_CURL_ARGS:-}" ] || printf '%s\n' "$@" > "$MOCK_CURL_ARGS"
+        cat "$MOCK_CURRENT_ZONE"
+        ;;
+esac
 EOF
 cat > "$temporary/bin/ping" <<'EOF'
 #!/bin/sh
@@ -50,7 +58,7 @@ TECHNITIUM_CA_FILE="$temporary/technitium-ca.pem" \
 DNSCTL_AUDIT_LOG="$temporary/audit.jsonl" \
     "$repo_root/management/dnsctl" plan "$temporary/desired.zone" \
     > "$temporary/plan.json" 2> "$temporary/plan.diff"
-jq -e '.schema_version == 1 and .zone == "home.arpa" and .changed == true' \
+jq -e '.schema_version == 2 and .zone == "home.arpa" and .changed == true and .source_commit == null' \
     "$temporary/plan.json" >/dev/null
 grep -q '^+' "$temporary/plan.diff"
 jq -e '.action == "plan:home.arpa" and .result == "ok"' \
@@ -65,16 +73,123 @@ if grep -Fx -- '--insecure' "$temporary/curl.args" >/dev/null; then
 fi
 pass dnsctl_uses_configured_ca
 
-if PATH="$temporary/bin:$PATH" \
-    MOCK_CURRENT_ZONE="$temporary/current.zone" \
-    TECHNITIUM_TOKEN_FILE="$temporary/token" \
-    DNSCTL_AUDIT_LOG="$temporary/audit.jsonl" \
-        "$repo_root/management/dnsctl" apply "$temporary/desired.zone" \
-        --approved-commit deadbeef --confirm NOT_APPLY >/dev/null 2>&1; then
-    echo "FAIL dnsctl apply accepted an invalid confirmation" >&2
+zone_repo=$temporary/zone-repo
+mkdir -p "$zone_repo/zones"
+cp "$temporary/desired.zone" "$zone_repo/zones/home.arpa.zone"
+git -C "$zone_repo" init -q
+git -C "$zone_repo" add zones/home.arpa.zone
+git -C "$zone_repo" -c user.name=test -c user.email=test@example.invalid \
+    commit -q -m zone
+dnsctl_in_repo() {
+    (
+        cd "$zone_repo"
+        PATH="$temporary/bin:$PATH" \
+        MOCK_CURRENT_ZONE="$temporary/current.zone" \
+        MOCK_IMPORT_LOG="$temporary/import.log" \
+        TECHNITIUM_URL="${DNSCTL_TEST_URL:-https://dns01:53443}" \
+        TECHNITIUM_TOKEN_FILE="$temporary/token" \
+        TECHNITIUM_CA_FILE="$temporary/technitium-ca.pem" \
+        DNSCTL_AUDIT_LOG="$temporary/apply-audit.jsonl" \
+            "$repo_root/management/dnsctl" "$@"
+    )
+}
+expect_apply_rejected() {
+    name=$1
+    shift
+    : > "$temporary/import.log"
+    if dnsctl_in_repo apply "$@" > "$temporary/reject.out" 2> "$temporary/reject.err"; then
+        echo "FAIL $name: dnsctl apply succeeded" >&2
+        exit 1
+    fi
+    if [ -s "$temporary/import.log" ]; then
+        echo "FAIL $name: dnsctl apply imported before rejecting" >&2
+        exit 1
+    fi
+    pass "$name"
+}
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+dnsctl_in_repo plan zones/home.arpa.zone --out "$temporary/reviewed.plan" \
+    > /dev/null 2> "$temporary/reviewed.err"
+plan_sha=$(sha256_of "$temporary/reviewed.plan")
+grep -q "^dnsctl: plan_sha256=$plan_sha$" "$temporary/reviewed.err"
+jq -e --arg commit "$(git -C "$zone_repo" rev-parse HEAD)" \
+    '.schema_version == 2 and .source_commit == $commit
+     and .zone_path == "zones/home.arpa.zone"
+     and .target_url == "https://dns01:53443" and .changed == true' \
+    "$temporary/reviewed.plan" >/dev/null
+[ ! -w "$temporary/reviewed.plan" ] || [ "$(id -u)" -eq 0 ]
+pass dnsctl_plan_saves_a_read_only_bound_plan
+
+if dnsctl_in_repo plan zones/home.arpa.zone --out "$temporary/reviewed.plan" \
+    >/dev/null 2>&1; then
+    echo "FAIL dnsctl plan overwrote a saved plan" >&2
     exit 1
 fi
-pass dnsctl_apply_requires_literal_confirmation
+[ "$(sha256_of "$temporary/reviewed.plan")" = "$plan_sha" ]
+pass dnsctl_saved_plans_are_immutable
+
+printf '%s\n' '; uncommitted' >> "$zone_repo/zones/home.arpa.zone"
+if dnsctl_in_repo plan zones/home.arpa.zone --out "$temporary/dirty.plan" \
+    >/dev/null 2>&1; then
+    echo "FAIL dnsctl saved a plan for an uncommitted zone" >&2
+    exit 1
+fi
+git -C "$zone_repo" checkout -q -- zones/home.arpa.zone
+pass dnsctl_saved_plan_requires_committed_zone
+
+expect_apply_rejected dnsctl_apply_requires_literal_confirmation \
+    --plan "$temporary/reviewed.plan" --plan-sha256 "$plan_sha" --confirm NOT_APPLY
+expect_apply_rejected dnsctl_apply_rejects_unreviewed_plan_hash \
+    --plan "$temporary/reviewed.plan" --plan-sha256 "$(printf '%064d' 0)" --confirm APPLY
+DNSCTL_TEST_URL=https://dns02:53443 expect_apply_rejected \
+    dnsctl_apply_rejects_other_endpoint \
+    --plan "$temporary/reviewed.plan" --plan-sha256 "$plan_sha" --confirm APPLY
+
+printf '%s\n' '; uncommitted' >> "$zone_repo/zones/home.arpa.zone"
+expect_apply_rejected dnsctl_apply_rejects_uncommitted_zone \
+    --plan "$temporary/reviewed.plan" --plan-sha256 "$plan_sha" --confirm APPLY
+git -C "$zone_repo" checkout -q -- zones/home.arpa.zone
+
+cp "$temporary/current.zone" "$temporary/current.zone.reviewed"
+printf '%s\n' 'drift IN A 10.0.9.8' >> "$temporary/current.zone"
+expect_apply_rejected dnsctl_apply_rejects_live_zone_drift \
+    --plan "$temporary/reviewed.plan" --plan-sha256 "$plan_sha" --confirm APPLY
+jq -s -e 'map(select(.result == "drifted")) | length == 1' \
+    "$temporary/apply-audit.jsonl" >/dev/null
+cp "$temporary/current.zone.reviewed" "$temporary/current.zone"
+
+: > "$temporary/import.log"
+dnsctl_in_repo apply --plan "$temporary/reviewed.plan" --plan-sha256 "$plan_sha" \
+    --confirm APPLY > "$temporary/apply.json"
+jq -e --arg plan "$plan_sha" '.status == "ok" and .plan_sha256 == $plan' \
+    "$temporary/apply.json" >/dev/null
+grep -q 'zone=home.arpa&overwrite=true' "$temporary/import.log"
+jq -s -e --arg plan "$plan_sha" \
+    'map(select(.action == "apply:home.arpa" and .result == "ok" and .plan_sha256 == $plan)) | length == 1' \
+    "$temporary/apply-audit.jsonl" >/dev/null
+pass dnsctl_apply_consumes_the_reviewed_plan
+
+expect_apply_rejected dnsctl_apply_rejects_replayed_plan \
+    --plan "$temporary/reviewed.plan" --plan-sha256 "$plan_sha" --confirm APPLY
+
+printf '%s\n' 'next IN A 10.0.9.10' >> "$zone_repo/zones/home.arpa.zone"
+git -C "$zone_repo" -c user.name=test -c user.email=test@example.invalid \
+    commit -q -am next
+dnsctl_in_repo plan zones/home.arpa.zone --out "$temporary/stale.plan" \
+    > /dev/null 2>&1
+stale_sha=$(sha256_of "$temporary/stale.plan")
+printf '%s\n' 'later IN A 10.0.9.11' >> "$zone_repo/zones/home.arpa.zone"
+git -C "$zone_repo" -c user.name=test -c user.email=test@example.invalid \
+    commit -q -am later
+expect_apply_rejected dnsctl_apply_rejects_other_source_commit \
+    --plan "$temporary/stale.plan" --plan-sha256 "$stale_sha" --confirm APPLY
 
 enrollment=$temporary/DNS-ENROLL
 generation=11111111-2222-3333-4444-555555555555
@@ -116,4 +231,4 @@ jq -e '
 ' "$temporary/network.json" >/dev/null
 pass network_preflight_offline_json_is_explicit
 
-echo "RESULT $pass_count/6 management simulations passed"
+echo "RESULT $pass_count/16 management simulations passed"

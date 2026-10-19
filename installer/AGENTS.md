@@ -96,8 +96,8 @@ installer/
   Playbook once the external consumer is implemented.
 - Existing source kinds are data-driven. A new source kind or profile adapter
   requires fetch, verify, stage, success, and rejection coverage.
-- `dnsctl apply` currently enforces literal `APPLY`, a caller-supplied commit
-  equal to `HEAD`, and a clean zone file. Human review and plan comparison are
-  operational requirements, not fully machine-enforced approval proofs.
+- `dnsctl apply` consumes one saved plan by SHA-256 and rejects target,
+  commit, zone, and live-zone drift and replays. Review of the plan is an
+  operational requirement; the command does not prove pull-request approval.
 - Releasing an image and writing a physical USB are separate approvals.
 

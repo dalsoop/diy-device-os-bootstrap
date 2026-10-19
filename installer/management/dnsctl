@@ -10,8 +10,13 @@ state_home=${XDG_STATE_HOME:-${HOME:?HOME is required}/.local/state}
 audit_log=${DNSCTL_AUDIT_LOG:-$state_home/dns-appliance/dnsctl-audit.jsonl}
 
 usage() {
-    echo "usage: TECHNITIUM_TOKEN_FILE=/secure/token $0 health|plan <zone-file>|apply <zone-file> --approved-commit <sha> --confirm APPLY" >&2
+    echo "usage: TECHNITIUM_TOKEN_FILE=/secure/token $0 health|plan <zone-file> [--out <plan-file>]|apply --plan <plan-file> --plan-sha256 <sha256> --confirm APPLY" >&2
     exit 2
+}
+
+fail() {
+    echo "dnsctl: $*" >&2
+    exit 1
 }
 
 if ! { [ -n "$token_file" ] && [ -s "$token_file" ]; }; then
@@ -19,6 +24,9 @@ if ! { [ -n "$token_file" ] && [ -s "$token_file" ]; }; then
 fi
 token=$(cat "$token_file")
 command=${1:-}
+
+temporary=$(mktemp -d "${TMPDIR:-/tmp}/dnsctl.XXXXXX")
+trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
 api() {
     method=$1
@@ -39,11 +47,14 @@ api() {
 audit() {
     action=$1
     result=$2
+    plan_sha256=${3:-}
     mkdir -p "$(dirname "$audit_log")"
     jq -nc --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --arg action "$action" --arg result "$result" \
         --arg commit "$(git rev-parse HEAD 2>/dev/null || printf unknown)" \
-        '{at:$at,action:$action,result:$result,commit:$commit}' >> "$audit_log"
+        --arg plan "$plan_sha256" \
+        '{at:$at,action:$action,result:$result,commit:$commit}
+         + (if $plan == "" then {} else {plan_sha256:$plan} end)' >> "$audit_log"
 }
 
 sha256_file() {
@@ -54,6 +65,23 @@ sha256_file() {
     fi
 }
 
+# Prints the zone file's path relative to the Git work tree, or nothing when
+# the file is outside one.
+tracked_zone_path() {
+    toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
+    toplevel=$(CDPATH='' cd -- "$toplevel" && pwd -P)
+    directory=$(CDPATH='' cd -- "$(dirname -- "$1")" && pwd -P)
+    absolute=$directory/$(basename -- "$1")
+    case "$absolute" in
+        "$toplevel"/*) printf '%s\n' "${absolute#"$toplevel"/}" ;;
+    esac
+}
+
+zone_is_committed() {
+    git ls-files --error-unmatch -- ":/$1" >/dev/null 2>&1 &&
+        [ -z "$(git status --short -- ":/$1")" ]
+}
+
 case "$command" in
     health)
         api GET '/api/dashboard/metrics/json' | jq '{status,server,uptimeSeconds:.response.uptimeSeconds,lifetimeCounters:.response.lifetimeCounters}'
@@ -61,57 +89,132 @@ case "$command" in
     plan)
         zone_file=${2:-}
         [ -r "$zone_file" ] || usage
+        shift 2
+        plan_out=
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --out) plan_out=${2:-}; [ -n "$plan_out" ] || usage; shift 2 ;;
+                *) usage ;;
+            esac
+        done
         zone=$(awk '$2 == "IN" && $3 == "SOA" { print $1; exit }' "$zone_file")
         [ "$zone" = @ ] && zone=$(awk '/^\$ORIGIN / { sub(/\.$/, "", $2); print $2; exit }' "$zone_file")
-        [ -n "$zone" ] || { echo "dnsctl: cannot determine zone" >&2; exit 1; }
-        current=$(mktemp)
-        trap 'rm -f "$current"' EXIT HUP INT TERM
+        [ -n "$zone" ] || fail "cannot determine zone"
+        [[ "$zone" =~ ^[A-Za-z0-9.-]+$ ]] || fail "zone name is not a plain DNS name"
+        zone_path=$(tracked_zone_path "$zone_file")
+        source_commit=
+        if [ -n "$zone_path" ] && zone_is_committed "$zone_path"; then
+            source_commit=$(git rev-parse HEAD)
+        fi
+        if [ -n "$plan_out" ]; then
+            [ -n "$source_commit" ] || fail "a saved plan requires a committed, unmodified zone file"
+            if [ -e "$plan_out" ] || [ -L "$plan_out" ]; then
+                fail "plan file already exists; plans are immutable"
+            fi
+        fi
+        current=$temporary/current.zone
         api GET "/api/zones/export?zone=$zone" > "$current"
         current_sha=$(sha256_file "$current")
         desired_sha=$(sha256_file "$zone_file")
         changed=true
         cmp -s "$current" "$zone_file" && changed=false
-        jq -n --arg zone "$zone" --arg current_sha256 "$current_sha" \
-            --arg desired_sha256 "$desired_sha" --argjson changed "$changed" \
-            '{schema_version:1,zone:$zone,current_sha256:$current_sha256,desired_sha256:$desired_sha256,changed:$changed}'
+        plan=$temporary/plan.json
+        jq -n --arg zone "$zone" --arg target_url "$url" \
+            --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg source_commit "$source_commit" --arg zone_path "$zone_path" \
+            --arg current_sha256 "$current_sha" --arg desired_sha256 "$desired_sha" \
+            --argjson changed "$changed" \
+            '{schema_version:2,created_at:$created_at,zone:$zone,target_url:$target_url,
+              source_commit:(if $source_commit == "" then null else $source_commit end),
+              zone_path:(if $zone_path == "" then null else $zone_path end),
+              current_sha256:$current_sha256,desired_sha256:$desired_sha256,
+              changed:$changed}' > "$plan"
+        saved_sha=
+        if [ -n "$plan_out" ]; then
+            chmod 0444 "$plan"
+            staged=$(mktemp "$(dirname -- "$plan_out")/.dnsctl-plan.XXXXXX")
+            cp -p "$plan" "$staged"
+            # A hard link never replaces an existing name, so a concurrent
+            # writer cannot overwrite a plan another operator is reviewing.
+            ln "$staged" "$plan_out" 2>/dev/null || {
+                rm -f "$staged"
+                fail "plan file already exists; plans are immutable"
+            }
+            rm -f "$staged"
+            saved_sha=$(sha256_file "$plan_out")
+            echo "dnsctl: plan_sha256=$saved_sha" >&2
+        fi
+        cat "$plan"
         if [ "$changed" = true ]; then
             diff -u "$current" "$zone_file" >&2 || true
         fi
-        audit "plan:$zone" ok
+        audit "plan:$zone" ok "$saved_sha"
         ;;
     apply)
-        zone_file=${2:-}
-        shift 2 || true
-        approved_commit=
+        shift
+        plan_file=
+        plan_sha256=
         confirm=
         while [ "$#" -gt 0 ]; do
             case "$1" in
-                --approved-commit) approved_commit=${2:-}; shift 2 ;;
+                --plan) plan_file=${2:-}; shift 2 ;;
+                --plan-sha256) plan_sha256=${2:-}; shift 2 ;;
                 --confirm) confirm=${2:-}; shift 2 ;;
                 *) usage ;;
             esac
         done
-        [ "$confirm" = APPLY ] || { echo "dnsctl: --confirm APPLY is required" >&2; exit 1; }
-        [ -r "$zone_file" ] || usage
-        [ -n "$approved_commit" ] || usage
-        [ "$(git rev-parse HEAD)" = "$approved_commit" ] || {
-            echo "dnsctl: approved commit is not the checked-out commit" >&2
-            exit 1
+        [ "$confirm" = APPLY ] || fail "--confirm APPLY is required"
+        [ -r "$plan_file" ] || usage
+        [[ "$plan_sha256" =~ ^[0-9a-f]{64}$ ]] || fail "--plan-sha256 must be a lowercase SHA-256"
+
+        # Hash and parse one private copy so the reviewed bytes cannot change
+        # between verification and use.
+        plan=$temporary/plan.json
+        cp "$plan_file" "$plan"
+        [ "$(sha256_file "$plan")" = "$plan_sha256" ] || fail "plan file does not match the reviewed plan_sha256"
+        jq -e '.schema_version == 2
+            and (.zone | type == "string" and test("^[A-Za-z0-9.-]+$"))
+            and (.target_url | type == "string")
+            and (.source_commit | type == "string" and test("^[0-9a-f]{40}$"))
+            and (.zone_path | type == "string" and (startswith("/") | not) and (contains("..") | not))
+            and (.current_sha256 | type == "string" and test("^[0-9a-f]{64}$"))
+            and (.desired_sha256 | type == "string" and test("^[0-9a-f]{64}$"))
+            and (.changed | type == "boolean")' "$plan" >/dev/null ||
+            fail "plan file is not a saved schema_version 2 plan"
+        zone=$(jq -r .zone "$plan")
+        if [ "$(jq -r .changed "$plan")" != true ]; then
+            audit "apply:$zone" unchanged "$plan_sha256"
+            jq -n --arg zone "$zone" '{status:"unchanged",zone:$zone}'
+            exit 0
+        fi
+        [ "$(jq -r .target_url "$plan")" = "$url" ] || fail "plan was made for a different Technitium endpoint"
+        [ "$(git rev-parse HEAD 2>/dev/null)" = "$(jq -r .source_commit "$plan")" ] ||
+            fail "checked-out commit is not the plan's source commit"
+        zone_path=$(jq -r .zone_path "$plan")
+        zone_is_committed "$zone_path" || fail "zone file has uncommitted changes"
+        zone_file=$(git rev-parse --show-toplevel)/$zone_path
+        [ "$(sha256_file "$zone_file")" = "$(jq -r .desired_sha256 "$plan")" ] ||
+            fail "zone file does not match the plan's desired state"
+        if [ -s "$audit_log" ] && jq -e --arg plan "$plan_sha256" \
+            'select(.result == "ok" and (.action | startswith("apply:")) and .plan_sha256 == $plan)' \
+            "$audit_log" >/dev/null 2>&1; then
+            fail "plan was already applied; create a new plan"
+        fi
+        current=$temporary/current.zone
+        api GET "/api/zones/export?zone=$zone" > "$current"
+        [ "$(sha256_file "$current")" = "$(jq -r .current_sha256 "$plan")" ] || {
+            audit "apply:$zone" drifted "$plan_sha256"
+            fail "live zone changed since the plan; create and review a new plan"
         }
-        [ -z "$(git status --short -- "$zone_file")" ] || {
-            echo "dnsctl: zone file has uncommitted changes" >&2
-            exit 1
-        }
-        zone=$(awk '/^\$ORIGIN / { sub(/\.$/, "", $2); print $2; exit }' "$zone_file")
         response=$(api POST "/api/zones/import?zone=$zone&overwrite=true&overwriteZone=true" \
             -F "file=@$zone_file;type=text/plain")
         [ "$(jq -r '.status' <<<"$response")" = ok ] || {
-            audit "apply:$zone" failed
+            audit "apply:$zone" failed "$plan_sha256"
             printf '%s\n' "$response" >&2
             exit 1
         }
-        audit "apply:$zone" ok
-        printf '%s\n' "$response" | jq '{status,response}'
+        audit "apply:$zone" ok "$plan_sha256"
+        printf '%s\n' "$response" | jq --arg plan "$plan_sha256" '{status,plan_sha256:$plan,response}'
         ;;
     *) usage ;;
 esac

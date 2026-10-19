@@ -10,10 +10,17 @@ Implemented bootstrap and operating surfaces:
 - `cluster-bootstrap` initializes dns01, joins dns02/dns03, imports the catalog
   backed `home.arpa` zone, and emits an age-encrypted agent token bundle.
 - `dnsctl health` uses the reader token.
-- `dnsctl plan` emits current and desired hashes plus a human diff.
-- `dnsctl apply` requires literal `--confirm APPLY`, a caller-supplied commit
-  equal to current `HEAD`, and a clean zone file; it does not consume a saved
-  plan or prove pull-request approval. Audit output is JSONL and contains no token.
+- `dnsctl plan <zone> [--out <plan-file>]` emits a schema version 2 plan with
+  the target URL, source commit, zone path, and current and desired hashes,
+  plus a human diff. `--out` requires a committed, unmodified zone, writes the
+  plan once as a read-only file, refuses an existing path, and prints
+  `plan_sha256` on stderr.
+- `dnsctl apply --plan <plan-file> --plan-sha256 <sha256> --confirm APPLY`
+  applies only that reviewed plan. It refuses a hash mismatch, another target
+  URL, a different `HEAD`, a modified zone file, a live zone that drifted from
+  the plan's current hash, and a plan that the audit log already records as
+  applied. It does not prove pull-request approval. Audit output is JSONL,
+  carries `plan_sha256`, and contains no token.
 - `collect-backups` retrieves only already-encrypted backup files over SSH.
 - `restore-node` requires an explicit target URL, local age identity, and exact
   restore confirmation.

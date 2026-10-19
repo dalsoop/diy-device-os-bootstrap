@@ -29,9 +29,9 @@ policy.
 - Redact or reject output that could expose credentials. Tokens must never
   appear in command arguments, URLs, logs, or MCP results.
 - The apply tool is disabled unless the management-host administrator sets
-  `DEVICE_OS_AGENT_ALLOW_APPLY=1`. It still requires a target-specific phrase,
-  the exact checked-out commit, a clean tracked zone file, and `dnsctl`'s own
-  confirmation gate.
+  `DEVICE_OS_AGENT_ALLOW_APPLY=1`. It applies only a plan saved by `dns_plan`,
+  named by its `plan_sha256` in a target-specific phrase, and `dnsctl` checks
+  that plan again before writing.
 
 ## Verification
 

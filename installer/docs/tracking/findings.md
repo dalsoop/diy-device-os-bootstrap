@@ -48,13 +48,15 @@ Those operations can follow a symlink whose resolved target is outside the
 checkout. Tracked bundles must not contain symlinks until the writer validates
 resolved containment and adds escape fixtures.
 
-## DNS apply does not prove review or bind a saved plan
+## DNS apply does not prove pull-request approval
 
-`dnsctl apply` verifies literal confirmation, a caller-supplied commit equal
-to current `HEAD`, and a clean zone file. It does not consume the output of
-`dnsctl plan`, verify a pull-request approval, or require unrelated checkout
-files to be clean. Operators must enforce those review steps outside the
-command until an immutable plan artifact and approval source are designed.
+`dnsctl apply` consumes one immutable saved plan by SHA-256 and rejects target,
+commit, zone-file, and live-zone drift and replays. It still cannot prove that
+a person reviewed that plan or that a pull request was approved, because no
+approval source is designed. Operators must verify approval before apply.
+Replay protection depends on the local audit log; a different management host
+or a deleted log does not see earlier applies, but live-zone drift detection
+still rejects a plan whose current hash no longer matches.
 
 ## Catalog schema files and executable validation can drift
 
