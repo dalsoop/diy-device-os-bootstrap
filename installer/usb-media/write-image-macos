@@ -88,7 +88,7 @@ diskutil unmountDisk "$device"
 raw_device=/dev/r${device#/dev/}
 
 # Hide the old partition map before writing. Disk Arbitration cannot auto-mount
-# the new exFAT volumes while the image body is written and read back.
+# the new filesystems while the image body is written and read back.
 dd if=/dev/zero of="$raw_device" bs=1m count=1 conv=notrunc
 sync
 dd if="$image" of="$raw_device" bs=1m skip=1 seek=1 conv=notrunc
@@ -96,7 +96,7 @@ sync
 cmp -i "$prefix_bytes:$prefix_bytes" -n "$body_bytes" "$image" "$raw_device"
 
 # Expose the verified image only after its body is proven. macOS may then mount
-# an exFAT volume and update ordinary filesystem metadata, so verify the MBR and
+# a volume and update ordinary filesystem metadata, so verify the MBR and
 # boot prefix independently before immediately unmounting and ejecting.
 dd if="$image" of="$raw_device" bs=1m count=1 conv=notrunc
 sync

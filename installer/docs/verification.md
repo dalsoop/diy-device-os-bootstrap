@@ -7,7 +7,7 @@ evidence.
 
 ## Automated source gates
 
-- `tests/install-gate-simulation.sh` passes all 26 cases, including direct
+- `tests/install-gate-simulation.sh` passes all 31 cases, including direct
   partition media, Ventoy's `/dev/mapper/Ventoy` ancestry, ambiguous and cyclic
   ancestry, fixed-bit USB targets, direct and indirect mounts, active swap,
   holders, and zero writes on every rejection.
@@ -38,7 +38,7 @@ evidence.
 - BIOS install with networking disconnected.
 - UEFI and Secure Boot install with networking disconnected.
 - Wrong DMI, wrong MAC, wrong disk serial, two matching disks, removable disk,
-  missing `DNS-ENROLL`, completed role, stale reinstall token, and corrupt exFAT
+  missing `DNS-ENROLL`, completed role, stale reinstall token, and corrupt FAT32
   all stop before erase.
 - Power loss after credential generation, during encrypted output, after final
   record rename, and before local completion converges without changing secrets.

@@ -66,7 +66,8 @@ router-cutover evidence.
 - workspace Catalog path, index, and bootloader ID;
 - one collection path;
 - zero or more safe relative local-entry paths;
-- USB data/enrollment labels and capacity reserves;
+- USB data/enrollment labels and capacity reserves; the FAT32 enrollment label
+  is limited to 11 characters;
 - safe relative repository-file or repository-tree bundles.
 
 Paths must be relative, normalized, non-empty, and free of `.` and `..`
@@ -137,7 +138,7 @@ images, bundles, Ventoy configuration, the resolved Catalog, its SHA-256, image
 checksums, human readme files, and a `licenses/` bundle. That bundle records the
 project license, license history, third-party notice inventory, exact source
 revision and archive URL, and its own `manifests/LICENSES.SHA256`. When the DNS
-adapter is present, a separate `DNS-ENROLL` partition stores installer
+adapter is present, a separate FAT32 `DNS-ENROLL` partition stores installer
 metadata, generations, and reinstall authorizations.
 
 The exact USB layout is an output contract. Configured source and destination

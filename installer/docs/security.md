@@ -7,11 +7,11 @@ Installer records the exact monorepo commit and Catalog tree after local
 structural validation, and trusts media only after SHA-256 verification. It
 never executes Catalog scripts.
 
-The writable exFAT partition is transport, not a security boundary. It is
-mounted `nodev,nosuid,noexec`, and every secret is encrypted before the first
-byte is written there. It also contains plaintext public enrollment evidence,
-including raw hardware identifiers and sanitized logs, so the USB still
-requires controlled custody and secure disposal.
+The writable FAT32 `DNS-ENROLL` partition is transport, not a security
+boundary. It is mounted `nodev,nosuid,noexec`, and every secret is encrypted
+before the first byte is written there. It also contains plaintext public
+enrollment evidence, including raw hardware identifiers and sanitized logs, so
+the USB still requires controlled custody and secure disposal.
 
 The management host is the control plane. DNS appliances expose only DNS and
 restricted host-management services. The router remains the DHCP authority.

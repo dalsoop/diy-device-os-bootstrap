@@ -78,7 +78,7 @@ Build on an amd64 Debian 13 machine with the required system packages:
 
 ```sh
 sudo apt-get install debian-cd debian-archive-keyring dctrl-tools \
-  distro-info-data python3-debian reprepro rsync wget xorriso isolinux \
+  distro-info-data dosfstools python3-debian reprepro rsync wget xorriso isolinux \
   syslinux-common skopeo jq curl
 installer/installer/fetch-locked-sources
 sudo apt-get install \
@@ -113,9 +113,9 @@ sudo ./device-os world burn \
   --confirm 'ERASE /dev/sdX USB_SERIAL'
 ```
 
-The result contains the selected multiboot media plus `DNS-ENROLL`. Re-identify
-the device and serial every time; never copy a previous command without checking
-`lsblk`.
+The result contains the selected multiboot media plus a FAT32 `DNS-ENROLL`
+partition. Re-identify the device and serial every time; never copy a previous
+command without checking `lsblk`.
 
 ## Install behavior
 

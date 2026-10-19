@@ -17,6 +17,10 @@ package_pool=${DNS_INSTALLER_PACKAGE_POOL:-/cdrom/pool}
 udpkg_command=${DNS_INSTALLER_UDPKG_COMMAND:-udpkg}
 network_detect_command=${DNS_INSTALLER_NETWORK_DETECT_COMMAND:-/bin/hw-detect}
 uname_command=${DNS_INSTALLER_UNAME_COMMAND:-uname}
+modprobe_command=${DNS_INSTALLER_MODPROBE_COMMAND:-modprobe}
+blkid_command=${DNS_INSTALLER_BLKID_COMMAND:-blkid}
+mount_command=${DNS_INSTALLER_MOUNT_COMMAND:-mount}
+umount_command=${DNS_INSTALLER_UMOUNT_COMMAND:-umount}
 state_file=$state_dir/install.env
 
 fail() {
@@ -212,19 +216,21 @@ check_reinstall_permission() {
     mounted_enrollment=false
 
     if [ -z "$enrollment_dir" ]; then
-        command -v blkid >/dev/null 2>&1 || fail "blkid is required to find DNS-ENROLL"
-        enrollment_device=$(blkid -L DNS-ENROLL 2>/dev/null || true)
+        command -v "$modprobe_command" >/dev/null 2>&1 || fail "$modprobe_command is required"
+        "$modprobe_command" vfat || fail "cannot load FAT32 enrollment support"
+        command -v "$blkid_command" >/dev/null 2>&1 || fail "$blkid_command is required to find DNS-ENROLL"
+        enrollment_device=$("$blkid_command" -L DNS-ENROLL 2>/dev/null || true)
         [ -n "$enrollment_device" ] || fail "DNS-ENROLL partition is missing"
         enrollment_dir=$state_dir/enrollment
         mkdir -p "$enrollment_dir"
-        mount -o ro,nodev,nosuid,noexec "$enrollment_device" "$enrollment_dir" ||
+        "$mount_command" -o ro,nodev,nosuid,noexec "$enrollment_device" "$enrollment_dir" ||
             fail "cannot mount DNS-ENROLL read-only"
         mounted_enrollment=true
     fi
 
     active_file=$enrollment_dir/records/$ROLE/ACTIVE
     if [ ! -s "$active_file" ]; then
-        [ "$mounted_enrollment" = false ] || umount "$enrollment_dir"
+        [ "$mounted_enrollment" = false ] || "$umount_command" "$enrollment_dir"
         return 0
     fi
 
@@ -242,7 +248,7 @@ check_reinstall_permission() {
     [ "$token_generation" = "$previous_generation" ] || fail "reinstall token generation mismatch"
     [ "$token_authorize" = true ] || fail "reinstall token does not authorize erase"
 
-    [ "$mounted_enrollment" = false ] || umount "$enrollment_dir"
+    [ "$mounted_enrollment" = false ] || "$umount_command" "$enrollment_dir"
 }
 
 physical_path() {

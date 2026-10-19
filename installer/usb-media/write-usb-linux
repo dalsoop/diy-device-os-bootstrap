@@ -77,7 +77,7 @@ fi
 
 [ "$(uname -s)" = Linux ] || fail "Linux is required"
 [ "$(id -u)" -eq 0 ] || fail "run as root"
-for command in lsblk findmnt jq sha256sum python3 sfdisk blockdev udevadm mkfs.exfat git; do
+for command in lsblk findmnt jq sha256sum python3 sfdisk blockdev udevadm mkfs.fat git; do
     command -v "$command" >/dev/null 2>&1 || fail "$command is required"
 done
 [ -r "$catalog" ] || fail "resolved catalog is missing; run ./device-os plan"
@@ -227,13 +227,20 @@ if [ "$reserve_mib" -gt 0 ]; then
     start=$(((last_sector + 2047) / 2048 * 2048))
     total_sectors=$((device_bytes / sector_size))
     [ $((total_sectors - start)) -gt 131072 ] || fail "reserved enrollment space was not created"
-    printf 'start=%s, type=7\n' "$start" | sfdisk --append "$device"
+    partition_table=$(sfdisk -J "$device" | jq -r '.partitiontable.label')
+    case "$partition_table" in
+        gpt) enrollment_partition_type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 ;;
+        dos) enrollment_partition_type=c ;;
+        *) fail "unsupported partition table $partition_table" ;;
+    esac
+    printf 'start=%s, type=%s\n' "$start" "$enrollment_partition_type" |
+        sfdisk --append "$device"
     blockdev --rereadpt "$device"
     udevadm settle
     enroll_partition=$(lsblk -nrpo NAME,TYPE,START "$device" |
         awk -v start="$start" '$2 == "part" && $3 == start { print $1; exit }')
     [ -b "$enroll_partition" ] || fail "$enrollment_label partition was not found"
-    mkfs.exfat -n "$enrollment_label" "$enroll_partition"
+    mkfs.fat -F 32 -n "$enrollment_label" "$enroll_partition"
 fi
 
 mkdir -p "$mount_dir" "$enroll_dir"

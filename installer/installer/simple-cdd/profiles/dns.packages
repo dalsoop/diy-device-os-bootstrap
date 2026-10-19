@@ -4,7 +4,6 @@ cockpit
 cockpit-system
 curl
 bind9-dnsutils
-exfatprogs
 jq
 kmod
 nftables

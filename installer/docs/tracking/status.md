@@ -13,15 +13,15 @@ check mark does not imply successful physical installation.
 | HTTPS download and SHA-256 cache verification | Yes | Source tests | Clean Linux download run for current pins |
 | Capacity planning for nominal sizes or read-only device queries | Yes | Read-only 16GB macOS run | CI fixture, runtime-artifact result, and live device query |
 | Korean-first Ventoy menu with no timer | Yes | Source tests | Physical legacy BIOS and UEFI menu |
-| Serial-bound removable USB writer | Yes | Two physical macOS writes; payload SHA-256 and exFAT checks passed | Physical rerun of the two-phase writer and BIOS/UEFI boot |
+| Serial-bound removable USB writer | Yes | Two prior-layout physical macOS writes; payload SHA-256 and exFAT checks passed | Physical FAT32-layout rerun of the two-phase writer and BIOS/UEFI boot |
 | Proxmox VE interactive entry | Yes | Metadata only | Boot and install on disposable disk |
 | Proxmox Backup Server interactive entry | Yes | Metadata only | Boot and install on disposable disk |
 | TrueNAS SCALE interactive entry | Yes | Metadata only | Boot and install on disposable disk |
 | Pop!_OS entry and Korean guide | Yes | Metadata/source only | Korean installation and Secure Boot |
 | Debian Live diagnostic entry | Yes | Metadata only | Boot and inventory capture |
 | Offline DNS ISO source and immutable locks | Yes | Source validation | Two clean amd64 Debian builds and comparison |
-| Fail-closed HP/NIC/disk install gate | Yes | 26-case isolated rejection and disk-preparation simulation | Rebuilt USB, BIOS, UEFI, Ventoy mapper, physical dns01 rerun |
-| Retry-safe encrypted first-boot enrollment | Yes | Source contract | Power-loss and real exFAT fault injection |
+| Fail-closed HP/NIC/disk install gate | Yes | 31-case isolated rejection and disk-preparation simulation | Rebuilt USB, BIOS, UEFI, Ventoy mapper, physical dns01 rerun |
+| Retry-safe encrypted first-boot enrollment | Yes | Source contract | Power-loss and real FAT32 fault injection |
 | Three-node Technitium cluster bootstrap | Yes | Source/fixture checks | Live three-node cluster and primary-loss drill |
 | Read/plan/apply DNS command boundary | Yes | Isolated simulation | Approved live canary change and rollback |
 | Encrypted backup collection and explicit restore | Yes | Source checks | Isolated restore drill from collected backup |

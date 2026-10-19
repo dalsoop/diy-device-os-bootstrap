@@ -24,6 +24,7 @@ done
 
 [ "$(uname -s)" = Linux ] || { echo "write-usb-linux: Linux is required" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || { echo "write-usb-linux: run as root" >&2; exit 1; }
+command -v mkfs.fat >/dev/null 2>&1 || { echo "write-usb-linux: mkfs.fat is required" >&2; exit 1; }
 [ -b "$device" ] || usage
 [ "$(lsblk -dnro TYPE "$device")" = disk ] || { echo "write-usb-linux: whole disk required" >&2; exit 1; }
 if ! { [ -r "$iso" ] && [ -r "$manifest" ]; }; then
@@ -69,7 +70,7 @@ total_sectors=$((device_bytes / sector_size))
 label=$(sfdisk -J "$device" | jq -r '.partitiontable.label')
 case "$label" in
     gpt) partition_type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 ;;
-    dos) partition_type=7 ;;
+    dos) partition_type=c ;;
     *) echo "write-usb-linux: unsupported partition table $label" >&2; exit 1 ;;
 esac
 
@@ -78,7 +79,7 @@ blockdev --rereadpt "$device"
 udevadm settle
 partition=$(lsblk -nrpo NAME,TYPE,START "$device" | awk -v start="$start" '$2 == "part" && $3 == start { print $1 }')
 [ -b "$partition" ] || { echo "write-usb-linux: new enrollment partition not found" >&2; exit 1; }
-mkfs.exfat -n DNS-ENROLL "$partition"
+mkfs.fat -F 32 -n DNS-ENROLL "$partition"
 
 mount_dir=$(mktemp -d /mnt/dns-enroll.XXXXXX)
 cleanup() {

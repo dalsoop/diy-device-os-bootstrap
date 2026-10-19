@@ -90,6 +90,16 @@ Response: normalize with explicit ASCII lowercase and uppercase alphabets. Keep
 the simulation's `tr` compatibility shim so GNU-hosted tests reject the
 non-portable character-class form, and repeat a disposable BIOS boot.
 
+Symptom: the early installer gate finds `DNS-ENROLL` but mounting it fails with
+`Invalid argument`.
+
+Cause: Debian Installer does not ship an exFAT kernel module, and its available
+FAT32 modules are not automatically loaded before the preseed early command.
+
+Response: format `DNS-ENROLL` as FAT32 and explicitly load `vfat` before the
+gate mounts it. Keep the 11-character label limit and test both module-load
+success and failure before any target write.
+
 Symptom: the expected target is rejected as active even though `/dev/sda` is
 not listed directly in `/proc/mounts`.
 

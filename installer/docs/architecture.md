@@ -99,7 +99,7 @@ strategy or profile adapter requires Installer code and rejection coverage.
 
 The immutable Debian image contains the offline package closure, a digest-pinned
 Technitium OCI image, a checksum-pinned Tailscale archive, inventory matching,
-and first-boot units. A separate `DNS-ENROLL` exFAT partition receives
+and first-boot units. A separate `DNS-ENROLL` FAT32 partition receives
 plaintext enrollment evidence and age-encrypted recovery secrets.
 
 The boot menu has no destructive timeout. After a deliberate DNS installer

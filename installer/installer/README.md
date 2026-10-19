@@ -5,8 +5,8 @@ This directory contains the first implementation of the Debian OS installer:
 - `fetch-locked-sources` verifies and caches the pinned Simple-CDD packages,
   Technitium OCI image, and Tailscale static archive.
 - `build-image` builds an offline amd64 image and release evidence on Debian 13.
-- `write-usb-linux` writes the verified ISO and appends `DNS-ENROLL` after an
-  exact destructive confirmation.
+- `write-usb-linux` writes the verified ISO and appends a FAT32 `DNS-ENROLL`
+  partition after an exact destructive confirmation.
 - `capture-inventory` hashes the exact identity of one HP PC, NIC, and disk.
 - `simple-cdd/` holds the unattended Debian Installer profile.
 - `scripts/install-gate` refuses partitioning unless one inventory entry and one

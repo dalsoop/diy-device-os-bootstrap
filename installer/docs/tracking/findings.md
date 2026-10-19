@@ -37,7 +37,9 @@ filesystems passed read-only checks. The original whole-device comparison then
 failed because macOS had automatically mounted both exFAT partitions and
 updated filesystem metadata. The writer now uses a two-phase MBR-last sequence
 with isolated success and failure simulations, but that revised sequence has
-not yet been rerun on disposable physical media. Do not claim the new writer is
+not yet been rerun on disposable physical media. The current source also uses
+FAT32 for `DNS-ENROLL` because Debian Installer cannot mount exFAT, so the old
+writes no longer represent the current layout. Do not claim the new writer is
 physically qualified until that rerun and a BIOS/UEFI boot test pass.
 
 ## Repository bundle symlinks are not contained

@@ -102,6 +102,9 @@ expect_rejected "$temporary/bad-digest.json"
 jq '.entries[1].profile_adapter = "shared-dangerous-default"' "$catalog" > "$temporary/unknown-adapter.json"
 expect_rejected "$temporary/unknown-adapter.json"
 
+jq '.usb.enrollment_label = "TOO-LONG-FAT32"' "$catalog" > "$temporary/long-enrollment-label.json"
+expect_rejected "$temporary/long-enrollment-label.json"
+
 jq '.entries += [{
   id: "example-live",
   group: "tools",

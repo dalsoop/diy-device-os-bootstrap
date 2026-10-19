@@ -105,7 +105,7 @@ DEVICE-INST/                   11-character exFAT label used by Ventoy's bundled
 ├── README_KO.txt
 └── README_EN.txt
 
-DNS-ENROLL/                 present only with the DNS profile
+DNS-ENROLL/                 FAT32; present only with the DNS profile
 ├── installer.json
 ├── records/
 └── reinstall/

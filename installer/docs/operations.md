@@ -6,7 +6,7 @@ Run every command in this document from the monorepo root.
 
 World and Catalog planning need Git, jq, and Ruby. Image download additionally
 needs curl and a SHA-256 implementation. Physical USB assembly runs on Linux with root access,
-Ventoy tooling, block-device utilities, and exFAT support. The DNS ISO builds on
+Ventoy tooling, block-device utilities, and exFAT plus FAT32 support. The DNS ISO builds on
 amd64 Debian 13 with Simple-CDD and the packages named by the build command.
 
 macOS may inspect, select, simulate, query device capacity, and write a prepared
@@ -81,7 +81,7 @@ paths, and enable destructive installation for the current pilot role only.
 
 ```sh
 sudo apt-get install debian-cd debian-archive-keyring dctrl-tools \
-  distro-info-data python3-debian reprepro rsync wget xorriso isolinux \
+  distro-info-data dosfstools python3-debian reprepro rsync wget xorriso isolinux \
   syslinux-common skopeo jq curl
 installer/installer/fetch-locked-sources
 sudo apt-get install \

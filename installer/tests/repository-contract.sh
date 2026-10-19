@@ -106,6 +106,17 @@ if grep -qx 'dnsutils' "$repo_root/installer/simple-cdd/profiles/dns.packages"; 
     echo "repository-contract: use the concrete bind9-dnsutils package, not its virtual dnsutils name" >&2
     exit 1
 fi
+if grep -qx 'exfatprogs' "$repo_root/installer/simple-cdd/profiles/dns.packages"; then
+    echo "repository-contract: installed appliances do not need exfatprogs for FAT32 enrollment" >&2
+    exit 1
+fi
+grep -q 'modprobe_command.*vfat' "$repo_root/installer/scripts/install-gate"
+grep -q 'mkfs.fat -F 32' "$repo_root/installer/write-usb-linux"
+grep -q 'mkfs.fat -F 32' "$repo_root/usb-media/write-usb-linux"
+if grep -q 'mkfs.exfat' "$repo_root/installer/write-usb-linux" "$repo_root/usb-media/write-usb-linux"; then
+    echo "repository-contract: DNS-ENROLL must remain FAT32 for Debian Installer compatibility" >&2
+    exit 1
+fi
 grep -q '/usr/share/doc/diy-device-os-bootstrap/SOURCE.md' \
     "$repo_root/installer/simple-cdd/profiles/dns.postinst"
 grep -q 'manifests/LICENSES.SHA256' "$repo_root/usb-media/write-usb-linux"

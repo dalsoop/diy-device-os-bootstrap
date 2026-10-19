@@ -63,7 +63,7 @@ jq -e '
   (.catalog.path | safe_rel) and
   (.catalog.collection | safe_rel) and
   (.usb.data_label | type == "string" and length > 0 and length <= 15) and
-  (.usb.enrollment_label | type == "string" and length > 0 and length <= 15) and
+  (.usb.enrollment_label | type == "string" and length > 0 and length <= 11) and
   (.usb.enrollment_reserve_mib | type == "number" and . >= 0) and
   (.usb.capacity_overhead_mib | type == "number" and . >= 128) and
   (.usb.default_language | type == "string" and length > 0) and
