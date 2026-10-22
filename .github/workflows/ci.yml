@@ -16,14 +16,14 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install validation tools
-        run: sudo apt-get update && sudo apt-get install -y jq ruby shellcheck
+        run: sudo apt-get update && sudo apt-get install -y jq python3-jsonschema ruby shellcheck
       - name: Check project license notices
         shell: bash
         run: |
           test -r LICENSE
-          test -r LICENSE_HISTORY.md
-          test -r THIRD_PARTY_NOTICES.md
-          test -r third_party/licenses/Tailscale-BSD-3-Clause.txt
+          test -r docs/licenses/LICENSE_HISTORY.md
+          test -r docs/licenses/THIRD_PARTY_NOTICES.md
+          test -r docs/licenses/Tailscale-BSD-3-Clause.txt
           missing=0
           while IFS= read -r file; do
             if ! grep -q '^# SPDX-FileCopyrightText: 2026 dalsoop$' "$file"; then
@@ -40,42 +40,277 @@ jobs:
         run: |
           python3 -m venv /tmp/device-os-agent-ci
           /tmp/device-os-agent-ci/bin/python -m pip install \
-            --requirement agent/requirements.lock
+            --requirement engine/agent/requirements.lock
       - name: Check shell syntax
         run: |
-          bash -n agent/run
-          find device-os installer catalog -type f -perm -u+x -print0 |
+          bash -n engine/agent/run
+          find device-os engine/installer engine/catalog -type f -perm -u+x -print0 |
             xargs -0 -n1 bash -n
       - name: ShellCheck
         run: |
-          shellcheck agent/run
-          find device-os installer catalog -type f -perm -u+x -print0 |
+          shellcheck engine/agent/run
+          find device-os engine/installer engine/catalog -type f -perm -u+x -print0 |
             xargs -0 shellcheck
       - name: Check Python syntax
         run: |
-          python3 -c 'compile(open("installer/management/dns-appliance-status-monitor/server.py", encoding="utf-8").read(), "server.py", "exec")'
-          python3 -c 'compile(open("agent/server.py", encoding="utf-8").read(), "server.py", "exec")'
+          python3 -c 'compile(open("engine/installer/management/dns-appliance-status-monitor/server.py", encoding="utf-8").read(), "server.py", "exec")'
+          python3 -c 'compile(open("engine/agent/server.py", encoding="utf-8").read(), "server.py", "exec")'
+          python3 -c 'compile(open("engine/installer/dns-image/lib/installer_glyphs.py", encoding="utf-8").read(), "installer_glyphs.py", "exec")'
       - name: Check Ruby syntax
         run: |
-          ruby -c world/bin/resolve-world
-          ruby -c world/tests/world-contract-simulation.rb
+          ruby -c engine/world/bin/resolve-world
+          ruby -c engine/world/bin/record-usb-event
+          ruby -c engine/world/tests/world-contract-simulation.rb
+          ruby -c engine/world/tests/usb-event-simulation.rb
       - name: Validate World contract
-        run: world/tests/world-contract-simulation.rb
+        run: |
+          engine/world/tests/world-contract-simulation.rb
+          engine/world/tests/usb-event-simulation.rb
       - name: Validate Catalog contracts
         run: |
-          catalog/bin/verify-catalog
-          catalog/tests/catalog-contract.sh
+          engine/catalog/bin/verify-catalog
+          engine/catalog/tests/catalog-contract.sh
+      - name: Validate JSON Schema contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 - <<'PY'
+          import copy
+          import json
+          import subprocess
+          from pathlib import Path
+
+          from jsonschema import Draft202012Validator
+
+          root = Path.cwd()
+
+          def load(path):
+              with (root / path).open(encoding="utf-8") as source:
+                  return json.load(source)
+
+          def validator(path):
+              schema = load(path)
+              Draft202012Validator.check_schema(schema)
+              return Draft202012Validator(schema)
+
+          def require_valid(name, selected_validator, instance):
+              errors = sorted(selected_validator.iter_errors(instance), key=lambda error: list(error.path))
+              if errors:
+                  raise SystemExit(f"valid fixture failed {name}: {errors[0].message}")
+
+          def require_invalid(name, selected_validator, instance):
+              if selected_validator.is_valid(instance):
+                  raise SystemExit(f"invalid fixture passed {name}")
+
+          catalog_index = validator("engine/catalog/schemas/catalog-index.schema.json")
+          media_entry = validator("engine/catalog/schemas/media-entry.schema.json")
+          bootloader = validator("engine/catalog/schemas/bootloader.schema.json")
+          component_registry = validator("engine/installer/schemas/component-redistribution-registry.schema.json")
+          component_review = validator("engine/installer/schemas/component-review-record.schema.json")
+          build_manifest = validator("engine/installer/schemas/dns-build-manifest.schema.json")
+          final_review = validator("engine/installer/schemas/dns-final-review-record.schema.json")
+          license_check = validator("engine/installer/schemas/license-check.schema.json")
+          raw_manifest = validator("engine/installer/schemas/raw-image-manifest.schema.json")
+
+          require_valid("Catalog index", catalog_index, load("engine/catalog/data/index.json"))
+          for path in sorted((root / "engine/catalog/data/entries").glob("*.json")):
+              require_valid(f"Catalog v2 entry {path.name}", media_entry, json.loads(path.read_text()))
+          for path in sorted((root / "engine/catalog/data/bootloaders").glob("*.json")):
+              require_valid(f"Catalog v2 bootloader {path.name}", bootloader, json.loads(path.read_text()))
+
+          invalid_media = load("engine/catalog/data/entries/debian-live.json")
+          invalid_media["redistribution"] = {"status": "unknown"}
+          require_invalid("Catalog v2 unknown redistribution", media_entry, invalid_media)
+          invalid_bootloader = load("engine/catalog/data/bootloaders/ventoy.json")
+          invalid_bootloader["unexpected"] = True
+          require_invalid("Catalog v2 additional property", bootloader, invalid_bootloader)
+
+          digest = "a" * 64
+          evidence = [
+              {"kind": kind, "url": f"https://example.invalid/{kind}"}
+              for kind in ("license", "notices", "corresponding-source", "trademark")
+          ]
+          obligations = [
+              {"kind": kind, "disposition": "not-required"}
+              for kind in ("license-text", "notices", "corresponding-source", "trademark")
+          ]
+          components = [
+              {"id": "debian-package-closure", "version": "13.7.0@20261011T000000Z", "digest": {"algorithm": "sha256", "value": digest}, "redistribution": {"status": "personal-use-only"}},
+              {"id": "technitium-oci", "version": "15.6.1", "digest": {"algorithm": "sha256", "value": digest}, "source_identity": {"kind": "oci-digest", "value": f"sha256:{digest}"}, "redistribution": {"status": "personal-use-only"}},
+              {"id": "tailscale-archive", "version": "1.104.1", "digest": {"algorithm": "sha256", "value": digest}, "redistribution": {"status": "personal-use-only"}},
+              {"id": "tailscale-dependency-report", "version": "1.104.1", "digest": {"algorithm": "sha256", "value": digest}, "redistribution": {"status": "personal-use-only"}},
+              {"id": "repository-source-snapshot", "version": "b" * 40, "digest": {"algorithm": "sha256", "value": digest}, "redistribution": {"status": "personal-use-only"}},
+          ]
+          registry_fixture = {"schema_version": 1, "artifact_id": "dns-appliance", "components": components}
+          review_fixture = {
+              "schema_version": 1, "status": "redistribution-reviewed", "component_id": "technitium-oci",
+              "component_version": "15.6.1", "artifact_sha256": digest,
+              "source_identity": {"kind": "oci-digest", "value": f"sha256:{digest}"},
+              "reviewed_at": "2026-10-17", "reviewer": "schema-fixture", "evidence": evidence,
+              "obligations": obligations,
+          }
+          build_fixture = {
+              "schema_version": 1, "artifact_id": "dns-appliance", "build_id": "schema-fixture", "install_mode": "guided",
+              "iso": "dns-appliance.iso", "iso_sha256": digest, "distribution_status": "personal-use-only",
+              "component_registry": "component-redistribution-registry.json", "component_registry_sha256": digest,
+              "distribution_policy_sha256": digest,
+              "components": [{"id": component["id"], "status": "personal-use-only"} for component in components],
+              "sbom": "sbom.spdx.json", "sbom_sha256": digest, "debian_point_release": "13.7.0",
+              "debian_snapshot": "20261011T000000Z", "technitium_version": "15.6.1",
+              "technitium_image_digest": f"sha256:{digest}", "technitium_archive_sha256": digest,
+              "tailscale_version": "1.104.1", "tailscale_archive_sha256": digest,
+              "source_revision": "b" * 40,
+              "source_repository": "https://github.com/dalsoop/diy-device-os-bootstrap",
+              "source_archive": f"https://github.com/dalsoop/diy-device-os-bootstrap/archive/{'b' * 40}.tar.gz",
+          }
+          final_fixture = {
+              "schema_version": 1, "artifact": {"id": "dns-appliance", "sha256": digest},
+              "inputs": {"component_registry_sha256": digest, "build_manifest_sha256": digest},
+              "reviewed_at": "2026-10-17", "reviewer": "schema-fixture", "evidence": evidence,
+              "obligations": obligations,
+          }
+          decision_fixture = {
+              "schema_version": 1, "mode": "personal-use", "decision": "allow",
+              "selected_artifacts": [{"id": "ventoy", "kind": "bootloader", "sha256": digest, "status": "personal-use-only"}],
+              "blockers": [], "warnings": [],
+          }
+          raw_fixture = {
+              "schema_version": 2, "kind": "device-os-raw-image",
+              "image": {"filename": "device.raw", "bytes": 4294967296, "sha256": digest},
+              "catalog": {"sha256": digest, "revision": "b" * 40, "tree": "c" * 40},
+              "license": {"mode": "personal-use", "decision": "allow", "distribution_policy_sha256": digest, "selected_artifacts": decision_fixture["selected_artifacts"]},
+              "world": {"slug": "gujo-home", "media_id": "inventory-capture"},
+          }
+
+          fixtures = [
+              ("component registry", component_registry, registry_fixture, "components"),
+              ("component review", component_review, review_fixture, "reviewer"),
+              ("DNS build manifest", build_manifest, build_fixture, "sbom_sha256"),
+              ("DNS final review", final_review, final_fixture, "obligations"),
+              ("license decision", license_check, decision_fixture, "decision"),
+              ("raw-image manifest", raw_manifest, raw_fixture, "license"),
+          ]
+          for name, selected_validator, valid_fixture, rejected_key in fixtures:
+              require_valid(name, selected_validator, valid_fixture)
+              invalid_fixture = copy.deepcopy(valid_fixture)
+              del invalid_fixture[rejected_key]
+              require_invalid(f"{name} missing {rejected_key}", selected_validator, invalid_fixture)
+
+          usb_event = validator("engine/world/schemas/usb-event.schema.json")
+          usb_verification = validator("engine/world/schemas/usb-verification.schema.json")
+          tracked = set(subprocess.run(
+              ["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True
+          ).stdout.decode("utf-8").split("\0")) - {""}
+
+          def require_tracked(name, base, relative, tree=False):
+              if not isinstance(relative, str) or not relative or relative.startswith("/") or any(
+                  segment in ("", ".", "..") for segment in relative.split("/")
+              ):
+                  raise SystemExit(f"record path is unsafe in {name}: {relative!r}")
+              path = f"{base}/{relative}" if base else relative
+              if path in tracked:
+                  return
+              if tree and any(candidate.startswith(f"{path}/") for candidate in tracked):
+                  return
+              raise SystemExit(f"record path does not resolve to a tracked path in {name}: {path}")
+
+          def require_world_plan(name, plan):
+              if plan.get("schema_version") != 1 or not isinstance(plan.get("source"), dict):
+                  raise SystemExit(f"World plan is malformed in {name}")
+              require_tracked(name, "", plan["source"].get("playbook"))
+              require_tracked(name, "", plan["source"].get("world"))
+
+          # failed/ holds failed-write records inside the generations root; it is never a generation.
+          generations = sorted(path for path in (root / "burn-history/logs/usb").iterdir()
+                               if path.is_dir() and path.name != "failed")
+          for generation in generations:
+              label = f"USB generation {generation.name}"
+              event = load(generation / "event.json")
+              require_valid(f"{label} event.json", usb_event, event)
+              verification = load(generation / "verification.json")
+              require_valid(f"{label} verification.json", usb_verification, verification)
+              if not (event["status"] == "succeeded" and event["generation_id"] == generation.name and
+                      verification["generation_id"] == generation.name and
+                      verification["event_id"] == event["event_id"]):
+                  raise SystemExit(f"{label} identity does not match its folder")
+              world_lock = load(generation / "world.lock.json")
+              require_world_plan(f"{label} world.lock.json", world_lock)
+              manifest = load(generation / "media-manifest.json")
+              if manifest.get("world") != world_lock:
+                  raise SystemExit(f"{label} media-manifest.json does not embed world.lock.json")
+              require_tracked(f"{label} catalog", "", manifest["catalog"]["path"], tree=True)
+              require_tracked(f"{label} collection", "engine/installer", manifest["catalog"]["collection"])
+              for bundle in manifest["bundles"]:
+                  require_tracked(f"{label} bundle", "engine/installer", bundle["source"]["path"],
+                                  tree=bundle["source"]["kind"] == "repository-tree")
+              for entry in manifest["entries"]:
+                  for key in ("manifest_schema", "component_registry_schema"):
+                      if key in entry["source"]:
+                          require_tracked(f"{label} {key}", "", entry["source"][key])
+                  if "final_review" in entry:
+                      require_tracked(f"{label} final_review", "", entry["final_review"]["schema"])
+              if not (generation / "world.yaml").is_file():
+                  raise SystemExit(f"{label} is missing world.yaml")
+          failed_records = sorted((root / "burn-history/logs/usb/failed").glob("**/*.json"))
+          for path in failed_records:
+              record = load(path)
+              require_valid(f"failed USB write {path.name}", usb_event, record)
+              if record["status"] == "succeeded" or record["generation_id"] is not None or path.stem != record["event_id"]:
+                  raise SystemExit(f"failed USB write {path.name} identity is invalid")
+
+          # Schema fixtures: the repository may hold no generations yet, so the
+          # record contracts are also exercised with synthetic v2 records.
+          fixture_target = {"display_name": "Fixture USB", "bytes": 15833497600}
+          fixture_readback = {"method": "mbr-last-raw-compare", "status": "passed"}
+          event_fixture = {
+              "schema_version": 2, "event_id": "20261017020000-gujo-home-0a1b2c3d",
+              "generation_candidate": "20261017020000-gujo-home", "generation_id": "20261017020000-gujo-home",
+              "world_slug": "gujo-home", "media_id": "inventory-capture", "writer": "macos-mbr-last",
+              "repository_revision": "b" * 40, "catalog_tree": "c" * 40, "status": "succeeded",
+              "started_at": "2026-10-17T02:00:00+09:00", "finished_at": "2026-10-17T02:30:00+09:00",
+              "exit_code": 0, "failure_code": None, "target": fixture_target, "readback": fixture_readback,
+          }
+          verification_fixture = {
+              "schema_version": 2, "writer": "macos-mbr-last", "target": fixture_target,
+              "preflight_at": "2026-10-16T17:00:00Z", "completed_at": "2026-10-16T17:30:00Z",
+              "readback": fixture_readback, "event_id": event_fixture["event_id"],
+              "generation_id": event_fixture["generation_id"], "repository_revision": "b" * 40,
+              "catalog_tree": "c" * 40,
+          }
+          failed_fixture = copy.deepcopy(event_fixture)
+          failed_fixture.update({"event_id": "20261017020001-gujo-home-4e5f6a7b",
+                                 "generation_candidate": "20261017020001-gujo-home", "generation_id": None,
+                                 "status": "failed", "failure_code": "media-provenance-mismatch"})
+          require_valid("USB event fixture", usb_event, event_fixture)
+          require_valid("USB verification fixture", usb_verification, verification_fixture)
+          require_valid("failed USB write fixture", usb_event, failed_fixture)
+          v1_event = load(generations[0] / "event.json") if generations else copy.deepcopy(event_fixture)
+          v1_event["schema_version"] = 1
+          v1_event["device_path"] = "/dev/fixture"
+          require_invalid("USB event with device_path", usb_event, v1_event)
+          v1_verification = load(generations[0] / "verification.json") if generations else copy.deepcopy(verification_fixture)
+          v1_verification["device_path"] = "/dev/fixture"
+          require_invalid("USB verification with device_path", usb_verification, v1_verification)
+          print(f"USB records: {len(generations)} generations and {len(failed_records)} failed writes validated")
+
+          print("JSON Schema contracts: passed")
+          PY
       - name: Resolve embedded Catalog
-        working-directory: installer
+        working-directory: engine/installer
         run: usb-media/resolve-catalog
       - name: Run Installer simulations
-        working-directory: installer
+        working-directory: engine/installer
         run: |
           tests/install-gate-simulation.sh
           tests/management-simulation.sh
           tests/tailscale-enrollment-simulation.sh
+          tests/dns-license-simulation.sh
+          tests/license-policy-simulation.sh
           tests/media-catalog-simulation.sh
+          tests/image-builder-simulation.sh
           tests/macos-writer-simulation.sh
+          tests/inventory-wizard-simulation.sh
+          tests/documentation-check-simulation.sh
           tests/repository-contract.sh
       - name: Run Agent Gateway simulation
-        run: /tmp/device-os-agent-ci/bin/python agent/tests/gateway_simulation.py
+        run: /tmp/device-os-agent-ci/bin/python engine/agent/tests/gateway_simulation.py

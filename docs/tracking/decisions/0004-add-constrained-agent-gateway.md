@@ -12,20 +12,27 @@ execution and credential boundaries.
 
 ## Decision
 
-Add a root `agent/` access plane that exposes a small MCP tool allowlist. The
+Add an `engine/agent/` access plane that exposes a small MCP tool allowlist. The
 gateway runs only on a trusted management host and uses MCP stdio. Remote
 clients reach that stdio process through a forced ordinary-SSH command carried
 over the reviewed Tailscale network.
 
 The gateway delegates to the root `device-os` command and reviewed
-`installer/management/` commands. It owns no desired state and reimplements no
+`engine/installer/management/` commands. It owns no desired state and reimplements no
 Installer behavior. USB burn, operating-system installation, restore,
 reinstall authorization, enrollment, arbitrary shell, arbitrary path, and
 arbitrary URL capabilities are not exposed.
 
 DNS writes are disabled by default. Enabling them requires management-host
-policy, a separate applier-token file, a target-specific phrase, the exact
-checked-out commit, a clean tracked zone, and the existing `dnsctl` apply gate.
+policy, a separate applier-token file, a plan saved by `dns_plan`, a
+target-specific phrase naming that plan's SHA-256, and the `dnsctl` apply gate.
+
+## Alternatives
+
+- A public HTTP management service was rejected because it would add a listener, router exposure, authentication surface, and another execution policy.
+- Unrestricted SSH was rejected because an agent could bypass command, path, credential, and destructive-operation boundaries.
+- Running the gateway on each appliance was rejected because orchestration and long-lived credentials belong to the management host, not the DNS runtime.
+- Implementing policy again inside the gateway was rejected because it could drift from the reviewed CLI gates.
 
 ## Consequences
 

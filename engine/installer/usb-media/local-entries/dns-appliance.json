@@ -1,0 +1,37 @@
+{
+  "schema_version": 2,
+  "id": "dns-appliance",
+  "group": "dns",
+  "destination": "images/01-dns/dns-appliance-installer.iso",
+  "menu_alias": "Debian OS + DNS 서버 설치 (내부 디스크 삭제 주의)",
+  "description_ko": "Debian OS와 DNS를 함께 설치합니다. 장비 식별·대상 디스크·재설치 승인 검사를 통과해야 합니다.",
+  "description_en": "Installs Debian OS and DNS together after hardware, target-disk and reinstall checks.",
+  "boot_behavior": "guarded-unattended",
+  "profile_adapter": "dns-appliance",
+  "redistribution": {
+    "status": "personal-use-only"
+  },
+  "source": {
+    "kind": "runtime-artifact",
+    "manifest_digest_field": "iso_sha256",
+    "manifest_destination": "manifests/dns-build-manifest.json",
+    "manifest_schema": "engine/installer/schemas/dns-build-manifest.schema.json",
+    "component_registry_filename": "component-redistribution-registry.json",
+    "component_registry_digest_field": "component_registry_sha256",
+    "component_registry_destination": "manifests/dns-component-redistribution-registry.json",
+    "component_registry_schema": "engine/installer/schemas/component-redistribution-registry.schema.json",
+    "distribution_policy_digest_field": "distribution_policy_sha256",
+    "sbom_filename": "sbom.spdx.json",
+    "sbom_digest_field": "sbom_sha256",
+    "sbom_destination": "manifests/dns-sbom.spdx.json"
+  },
+  "final_review": {
+    "required_for_status": "redistribution-reviewed",
+    "record_filename": "dns-final-review-record.json",
+    "record_destination": "manifests/dns-final-review-record.json",
+    "schema": "engine/installer/schemas/dns-final-review-record.schema.json",
+    "artifact_digest_field": "artifact.sha256",
+    "component_registry_digest_field": "inputs.component_registry_sha256",
+    "build_manifest_digest_field": "inputs.build_manifest_sha256"
+  }
+}

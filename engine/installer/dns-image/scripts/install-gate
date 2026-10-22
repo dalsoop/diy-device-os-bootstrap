@@ -1,0 +1,645 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+identity_reader=$script_dir/disk-identity
+[ -r "$identity_reader" ] || identity_reader=$script_dir/../disk-identity
+media_dir=${DNS_INSTALLER_MEDIA_DIR:-/cdrom/simple-cdd}
+state_dir=${DNS_INSTALLER_STATE_DIR:-/run/dns-appliance}
+sys_root=${DNS_INSTALLER_SYS_ROOT:-/sys}
+mounts_file=${DNS_INSTALLER_MOUNTS_FILE:-/proc/mounts}
+swaps_file=${DNS_INSTALLER_SWAPS_FILE:-/proc/swaps}
+debconf_set_command=${DNS_INSTALLER_DEBCONF_SET:-debconf-set}
+device_root=${DNS_INSTALLER_DEVICE_ROOT:-/dev}
+zero_command=${DNS_INSTALLER_ZERO_COMMAND:-dd}
+blockdev_command=${DNS_INSTALLER_BLOCKDEV_COMMAND:-blockdev}
+sync_command=${DNS_INSTALLER_SYNC_COMMAND:-sync}
+state_file=$state_dir/install.env
+inventory_dir=$media_dir
+install_mode=reviewed
+if [ -e "$media_dir/install-mode" ]; then
+    install_mode=$(cat "$media_dir/install-mode")
+fi
+
+fail() {
+    message="DNS appliance install blocked: $*"
+    logger -t dns-appliance-installer "$message" 2>/dev/null || true
+    echo "$message" >&2
+    exit 1
+}
+
+normalize() {
+    LC_ALL=C tr '[:lower:]' '[:upper:]' |
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+hash_value() {
+    value=$1
+    [ -n "$value" ] || fail "empty hardware identity"
+    printf '%s' "$value" | normalize | sha256sum | awk '{print $1}'
+}
+
+read_first_line() {
+    file=$1
+    [ -r "$file" ] || fail "cannot read $file"
+    sed -n '1p' "$file"
+}
+
+read_disk_identity() {
+    DNS_DISK_SYS_ROOT="$sys_root" DNS_DISK_DEVICE_ROOT="$device_root" \
+        /bin/sh "$identity_reader" "$1" "$2"
+}
+
+set_debconf() {
+    if command -v db_set >/dev/null 2>&1; then
+        db_set "$@"
+        db_fset "$1" seen true
+    else
+        "$debconf_set_command" "$@"
+    fi
+}
+
+load_config() {
+    config=$1
+    ROLE=
+    ADDRESS=
+    PREFIX_LENGTH=
+    NETMASK=
+    GATEWAY=
+    DNS_SERVERS=
+    DOMAIN=
+    LAN_CIDR=
+    MANAGEMENT_CIDR=
+    CLUSTER_DOMAIN=
+    EXPECTED_PRODUCT_NAME_SHA256=
+    EXPECTED_PRODUCT_SKU_SHA256=
+    EXPECTED_SYSTEM_SERIAL_SHA256=
+    EXPECTED_SYSTEM_UUID_SHA256=
+    EXPECTED_MAC_SHA256=
+    EXPECTED_DISK_MODEL_SHA256=
+    EXPECTED_DISK_SERIAL_SHA256=
+    EXPECTED_DISK_MIN_BYTES=
+    EXPECTED_DISK_BYTES=
+    EXPECTED_DISK_NAME=
+    DESTRUCTIVE_INSTALL_ENABLED=
+
+    while IFS='=' read -r key value; do
+        case "$key" in
+            role) ROLE=$value ;;
+            address) ADDRESS=$value ;;
+            prefix_length) PREFIX_LENGTH=$value ;;
+            netmask) NETMASK=$value ;;
+            gateway) GATEWAY=$value ;;
+            dns_servers) DNS_SERVERS=$value ;;
+            domain) DOMAIN=$value ;;
+            lan_cidr) LAN_CIDR=$value ;;
+            management_cidr) MANAGEMENT_CIDR=$value ;;
+            cluster_domain) CLUSTER_DOMAIN=$value ;;
+            expected_product_name_sha256) EXPECTED_PRODUCT_NAME_SHA256=$value ;;
+            expected_product_sku_sha256) EXPECTED_PRODUCT_SKU_SHA256=$value ;;
+            expected_system_serial_sha256) EXPECTED_SYSTEM_SERIAL_SHA256=$value ;;
+            expected_system_uuid_sha256) EXPECTED_SYSTEM_UUID_SHA256=$value ;;
+            expected_mac_sha256) EXPECTED_MAC_SHA256=$value ;;
+            expected_disk_model_sha256) EXPECTED_DISK_MODEL_SHA256=$value ;;
+            expected_disk_serial_sha256) EXPECTED_DISK_SERIAL_SHA256=$value ;;
+            expected_disk_min_bytes) EXPECTED_DISK_MIN_BYTES=$value ;;
+            expected_disk_bytes) EXPECTED_DISK_BYTES=$value ;;
+            expected_disk_name) EXPECTED_DISK_NAME=$value ;;
+            destructive_install_enabled) DESTRUCTIVE_INSTALL_ENABLED=$value ;;
+        esac
+    done < "$config"
+}
+
+validate_profile() {
+    awk -F= -v role="$2" '
+        # Debian Installer BusyBox awk omits exponentiation support.
+        function power2(n,    result,i) {
+            result=1
+            for (i=0;i<n;i++) result*=2
+            return result
+        }
+        function ip(value,    a,n,i,result) {
+            n=split(value,a,"."); result=0
+            if (n != 4) bad=1
+            for (i=1;i<=n;i++) {
+                if (a[i] !~ /^[0-9]+$/ || a[i]+0 > 255 || length(a[i]) > 3) bad=1
+                result=result*256+a[i]
+            }
+            return result
+        }
+        function cidr(value,    a,n,p,addr) {
+            n=split(value,a,"/"); p=a[2]+0; addr=ip(a[1])
+            if (n != 2 || a[2] !~ /^[0-9]+$/ || p<1 || p>32) { bad=1; return 0 }
+            if (addr % power2(32-p) != 0) bad=1
+            return addr
+        }
+        /^[[:space:]]*(#|$)/ {next}
+        NF != 2 || $1 !~ /^[a-z0-9_]+$/ || seen[$1]++ {bad=1}
+        {v[$1]=$2}
+        END {
+            required="role address prefix_length netmask gateway dns_servers domain lan_cidr management_cidr cluster_domain"
+            count=split(required,keys," ")
+            for (i=1;i<=count;i++) if (v[keys[i]] == "") bad=1
+            if (v["role"] != role || role !~ /^dns0[123]$/) bad=1
+            p=v["prefix_length"]+0
+            if (v["prefix_length"] !~ /^[0-9]+$/ || p<1 || p>30) {exit 1}
+            size=power2(32-p)
+            address=ip(v["address"]); gateway=ip(v["gateway"])
+            ip(v["dns_servers"])
+            if (ip(v["netmask"]) != power2(32)-size) bad=1
+            lan=cidr(v["lan_cidr"]); split(v["lan_cidr"],a,"/")
+            if (a[2]+0 != p || int(address/size)*size != lan || int(gateway/size)*size != lan) bad=1
+            if (address == gateway || address == lan || address == lan+size-1 || gateway == lan || gateway == lan+size-1) bad=1
+            management=cidr(v["management_cidr"]); split(v["management_cidr"],a,"/")
+            if (a[2]+0 < p || int(management/size)*size != lan) bad=1
+            if (v["domain"] !~ /^[a-z0-9][a-z0-9.-]*[a-z0-9]$/ || v["cluster_domain"] !~ /^[a-z0-9][a-z0-9.-]*[a-z0-9]$/) bad=1
+            exit bad ? 1 : 0
+        }
+    ' "$1" || fail "invalid or inconsistent network profile for $2"
+}
+
+match_node() {
+    product_name_hash=$(hash_value "$(read_first_line "$sys_root/class/dmi/id/product_name")")
+    product_sku_hash=$(hash_value "$(read_first_line "$sys_root/class/dmi/id/product_sku")")
+    system_serial_hash=$(hash_value "$(read_first_line "$sys_root/class/dmi/id/product_serial")")
+    system_uuid_hash=$(hash_value "$(read_first_line "$sys_root/class/dmi/id/product_uuid")")
+
+    matches=0
+    matched_config=
+    matched_nic=
+
+    for config in "$inventory_dir"/dns01.conf "$inventory_dir"/dns02.conf "$inventory_dir"/dns03.conf; do
+        [ -r "$config" ] || fail "missing embedded inventory $(basename "$config")"
+        load_config "$config"
+        [ "$DESTRUCTIVE_INSTALL_ENABLED" = true ] || continue
+        [ "$product_name_hash" = "$EXPECTED_PRODUCT_NAME_SHA256" ] || continue
+        [ "$product_sku_hash" = "$EXPECTED_PRODUCT_SKU_SHA256" ] || continue
+        [ "$system_serial_hash" = "$EXPECTED_SYSTEM_SERIAL_SHA256" ] || continue
+        [ "$system_uuid_hash" = "$EXPECTED_SYSTEM_UUID_SHA256" ] || continue
+
+        nic_match=
+        nic_count=0
+        for nic_path in "$sys_root"/class/net/*; do
+            nic=${nic_path##*/}
+            [ "$nic" = lo ] && continue
+            [ -r "$nic_path/address" ] || continue
+            mac_hash=$(hash_value "$(read_first_line "$nic_path/address")")
+            if [ "$mac_hash" = "$EXPECTED_MAC_SHA256" ]; then
+                nic_match=$nic
+                nic_count=$((nic_count + 1))
+            fi
+        done
+        [ "$nic_count" -eq 1 ] || continue
+
+        matches=$((matches + 1))
+        matched_config=$config
+        matched_nic=$nic_match
+    done
+
+    [ "$matches" -eq 1 ] || fail "hardware matched $matches inventory entries; expected exactly one"
+    load_config "$matched_config"
+    NIC_NAME=$matched_nic
+    NIC_MAC=$(read_first_line "$sys_root/class/net/$NIC_NAME/address")
+
+    for value in "$ROLE" "$ADDRESS" "$PREFIX_LENGTH" "$NETMASK" "$GATEWAY" \
+        "$DNS_SERVERS" "$DOMAIN" "$LAN_CIDR" "$MANAGEMENT_CIDR" "$CLUSTER_DOMAIN"; do
+        [ -n "$value" ] || fail "inventory entry for $ROLE is incomplete"
+    done
+
+    check_reinstall_permission
+
+    mkdir -p "$state_dir"
+    {
+        printf 'ROLE=%s\n' "$ROLE"
+        printf 'ADDRESS=%s\n' "$ADDRESS"
+        printf 'PREFIX_LENGTH=%s\n' "$PREFIX_LENGTH"
+        printf 'NETMASK=%s\n' "$NETMASK"
+        printf 'GATEWAY=%s\n' "$GATEWAY"
+        printf 'DNS_SERVERS=%s\n' "$DNS_SERVERS"
+        printf 'DOMAIN=%s\n' "$DOMAIN"
+        printf 'LAN_CIDR=%s\n' "$LAN_CIDR"
+        printf 'MANAGEMENT_CIDR=%s\n' "$MANAGEMENT_CIDR"
+        printf 'CLUSTER_DOMAIN=%s\n' "$CLUSTER_DOMAIN"
+        printf 'NIC_NAME=%s\n' "$NIC_NAME"
+        printf 'NIC_MAC=%s\n' "$NIC_MAC"
+    } > "$state_file"
+
+    set_debconf netcfg/choose_interface "$NIC_NAME"
+    set_debconf netcfg/get_hostname "$ROLE"
+    set_debconf netcfg/get_domain "$DOMAIN"
+    set_debconf netcfg/get_ipaddress "$ADDRESS"
+    set_debconf netcfg/get_netmask "$NETMASK"
+    set_debconf netcfg/get_gateway "$GATEWAY"
+    set_debconf netcfg/get_nameservers "$DNS_SERVERS"
+    set_debconf netcfg/confirm_static true
+}
+
+check_reinstall_permission() {
+    enrollment_dir=${DNS_INSTALLER_ENROLLMENT_DIR:-}
+    mounted_enrollment=false
+
+    if [ -z "$enrollment_dir" ]; then
+        command -v blkid >/dev/null 2>&1 || fail "blkid is required to find DNS-ENROLL"
+        enrollment_device=$(blkid -L DNS-ENROLL 2>/dev/null || true)
+        [ -n "$enrollment_device" ] || fail "DNS-ENROLL partition is missing"
+        enrollment_dir=$state_dir/enrollment
+        mkdir -p "$enrollment_dir"
+        mount -t vfat -o ro,nodev,nosuid,noexec "$enrollment_device" "$enrollment_dir" ||
+            fail "cannot mount DNS-ENROLL read-only"
+        mounted_enrollment=true
+    fi
+
+    active_file=$enrollment_dir/records/$ROLE/ACTIVE
+    if [ ! -s "$active_file" ]; then
+        [ "$mounted_enrollment" = false ] || umount "$enrollment_dir"
+        return 0
+    fi
+
+    previous_generation=$(sed -n '1p' "$active_file")
+    token=$enrollment_dir/reinstall/$ROLE.allow
+    [ -r "$token" ] || fail "$ROLE already completed generation $previous_generation; reinstall token missing"
+
+    token_role=$(awk -F= '$1 == "role" { print $2 }' "$token")
+    token_uuid=$(awk -F= '$1 == "system_uuid_sha256" { print $2 }' "$token")
+    token_generation=$(awk -F= '$1 == "previous_generation" { print $2 }' "$token")
+    token_authorize=$(awk -F= '$1 == "authorize_erase" { print $2 }' "$token")
+
+    [ "$token_role" = "$ROLE" ] || fail "reinstall token role mismatch"
+    [ "$token_uuid" = "$system_uuid_hash" ] || fail "reinstall token hardware mismatch"
+    [ "$token_generation" = "$previous_generation" ] || fail "reinstall token generation mismatch"
+    [ "$token_authorize" = true ] || fail "reinstall token does not authorize erase"
+
+    [ "$mounted_enrollment" = false ] || umount "$enrollment_dir"
+}
+
+physical_path() {
+    CDPATH='' cd -P "$1" 2>/dev/null && pwd
+}
+
+block_name_from_source() {
+    source=$1
+    case "$source" in
+        /dev/mapper/*)
+            mapper_name=${source#/dev/mapper/}
+            mapper_matches=0
+            block_name=
+            for mapper_path in "$sys_root"/class/block/dm-*; do
+                [ -r "$mapper_path/dm/name" ] || continue
+                [ "$(read_first_line "$mapper_path/dm/name")" = "$mapper_name" ] || continue
+                mapper_matches=$((mapper_matches + 1))
+                block_name=${mapper_path##*/}
+            done
+            [ "$mapper_matches" -eq 1 ] ||
+                fail "device mapper $mapper_name resolved to $mapper_matches block devices"
+            printf '%s\n' "$block_name"
+            ;;
+        /dev/*)
+            block_name=${source#/dev/}
+            case "$block_name" in
+                */*) fail "unsupported device source $source" ;;
+            esac
+            [ -e "$sys_root/class/block/$block_name" ] ||
+                fail "block device $block_name from $source is unresolved"
+            printf '%s\n' "$block_name"
+            ;;
+        *)
+            fail "unsupported device source $source"
+            ;;
+    esac
+}
+
+physical_parent_disk() {
+    block_name=$1
+    depth=0
+
+    while [ "$depth" -lt 16 ]; do
+        block_path=$sys_root/class/block/$block_name
+        [ -e "$block_path" ] || fail "cannot resolve block device $block_name"
+
+        if [ -e "$block_path/partition" ]; then
+            resolved_path=$(physical_path "$block_path") ||
+                fail "cannot resolve partition parent for $block_name"
+            parent_name=$(basename "$(dirname "$resolved_path")")
+            [ "$parent_name" != "$block_name" ] ||
+                fail "partition parent loop for $block_name"
+            block_name=$parent_name
+            depth=$((depth + 1))
+            continue
+        fi
+
+        slave_count=0
+        slave_name=
+        for slave_path in "$block_path"/slaves/*; do
+            [ -e "$slave_path" ] || continue
+            slave_count=$((slave_count + 1))
+            slave_name=${slave_path##*/}
+        done
+        if [ "$slave_count" -gt 0 ]; then
+            [ "$slave_count" -eq 1 ] ||
+                fail "$block_name has $slave_count backing devices; expected exactly one"
+            block_name=$slave_name
+            depth=$((depth + 1))
+            continue
+        fi
+
+        case "$block_name" in
+            loop*|dm-*|md*)
+                fail "block device $block_name has no resolvable physical parent"
+                ;;
+        esac
+        printf '%s\n' "$block_name"
+        return 0
+    done
+
+    fail "block-device ancestry exceeded the safety limit"
+}
+
+boot_parent_disk() {
+    source=$(awk '$2 == "/cdrom" { print $1; exit }' "$mounts_file")
+    [ -n "$source" ] || fail "/cdrom mount source is missing"
+    block_name=$(block_name_from_source "$source")
+    physical_parent_disk "$block_name"
+}
+
+disk_is_usb_backed() {
+    disk=$1
+    device_path=$(physical_path "$sys_root/class/block/$disk/device") ||
+        fail "cannot resolve transport for candidate disk $disk"
+    case "$device_path" in
+        */usb*/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+assert_target_unmounted() {
+    checked_disk=$1
+    while IFS=' ' read -r source _rest; do
+        case "$source" in
+            "/dev/$checked_disk"|"/dev/$checked_disk"[0-9]*|"/dev/$checked_disk"p[0-9]*)
+                fail "target disk $checked_disk has a mounted filesystem"
+                ;;
+            /dev/*)
+                mounted_name=$(block_name_from_source "$source")
+                mounted_parent=$(physical_parent_disk "$mounted_name")
+                [ "$mounted_parent" != "$checked_disk" ] ||
+                    fail "target disk $checked_disk backs a mounted filesystem"
+                ;;
+        esac
+    done < "$mounts_file"
+    [ -r "$swaps_file" ] || fail "cannot inspect active swap"
+    while read -r source _rest; do
+        case "$source" in
+            /dev/*)
+                swap_name=$(block_name_from_source "$source")
+                swap_parent=$(physical_parent_disk "$swap_name")
+                [ "$swap_parent" != "$checked_disk" ] || fail "target disk $checked_disk backs active swap"
+                ;;
+        esac
+    done < "$swaps_file"
+    for component in "$sys_root/class/block/$checked_disk" \
+        "$sys_root/class/block/$checked_disk"/"$checked_disk"*; do
+        for holder in "$component"/holders/*; do
+            [ ! -e "$holder" ] || fail "target disk $checked_disk has an active block-device holder"
+        done
+    done
+}
+
+prepare_target_disk() {
+    disk=$1
+    sectors=$2
+    edge_sectors=131072
+    [ "$sectors" -gt $((edge_sectors * 2)) ] ||
+        fail "target disk $disk is too small for guarded preparation"
+    assert_target_unmounted "$disk"
+
+    target=$device_root/$disk
+    if [ "$device_root" = /dev ]; then
+        [ -b "$target" ] || fail "target $target is not a block device"
+    fi
+    command -v "$zero_command" >/dev/null 2>&1 || fail "$zero_command is required"
+    command -v "$blockdev_command" >/dev/null 2>&1 || fail "$blockdev_command is required"
+    command -v "$sync_command" >/dev/null 2>&1 || fail "$sync_command is required"
+
+    "$zero_command" if=/dev/zero of="$target" bs=512 count="$edge_sectors" ||
+        fail "cannot clear leading signatures from $target"
+    "$zero_command" if=/dev/zero of="$target" bs=512 \
+        seek=$((sectors - edge_sectors)) count="$edge_sectors" ||
+        fail "cannot clear trailing signatures from $target"
+    "$sync_command" || fail "cannot synchronize target preparation"
+    "$blockdev_command" --rereadpt "$target" ||
+        fail "cannot refresh the partition table for $target"
+}
+
+match_disk() {
+    disk_matches=0
+    matched_disk=
+    matched_sectors=
+    media_disk=$(boot_parent_disk)
+
+    for disk_path in "$sys_root"/class/block/*; do
+        disk=${disk_path##*/}
+        case "$disk" in
+            loop*|ram*|fd*|sr*|dm-*|md*) continue ;;
+        esac
+        [ ! -e "$disk_path/partition" ] || continue
+        [ "$(read_first_line "$disk_path/removable")" = 0 ] || continue
+        [ "$disk" != "$media_disk" ] || continue
+        disk_is_usb_backed "$disk" && continue
+        model=$(read_disk_identity "$disk" model) || continue
+        serial=$(read_disk_identity "$disk" serial) || continue
+        model_hash=$(hash_value "$model")
+        serial_hash=$(hash_value "$serial")
+        sectors=$(read_first_line "$disk_path/size")
+        case "$sectors" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        bytes=$((sectors * 512))
+
+        [ "$model_hash" = "$EXPECTED_DISK_MODEL_SHA256" ] || continue
+        [ "$serial_hash" = "$EXPECTED_DISK_SERIAL_SHA256" ] || continue
+        [ "$bytes" -ge "$EXPECTED_DISK_MIN_BYTES" ] || continue
+        if [ "$install_mode" = guided ]; then
+            [ "$bytes" = "$EXPECTED_DISK_BYTES" ] || continue
+            [ "$disk" = "$EXPECTED_DISK_NAME" ] || continue
+        fi
+
+        disk_matches=$((disk_matches + 1))
+        matched_disk=/dev/$disk
+        matched_sectors=$sectors
+    done
+
+    [ "$disk_matches" -eq 1 ] || fail "disk matched $disk_matches targets; expected exactly one"
+    matched_name=${matched_disk#/dev/}
+    if [ "$install_mode" = guided ]; then
+        assert_single_guided_disk
+        [ "$guided_disk" = "$matched_name" ] || fail "confirmed target changed"
+        confirmation="ERASE $ROLE $matched_disk $(read_disk_identity "$matched_name" serial) $((matched_sectors * 512))"
+        [ -r "$state_dir/erase-confirmation" ] || fail "fresh erase confirmation is missing"
+        [ "$(cat "$state_dir/erase-confirmation")" = "$confirmation" ] ||
+            fail "erase confirmation no longer matches the target"
+    fi
+    prepare_target_disk "$matched_name" "$matched_sectors"
+    {
+        printf 'TARGET_DISK=%s\n' "$matched_disk"
+        printf 'TARGET_DISK_MODEL=%s\n' "$(read_disk_identity "$matched_name" model)"
+        printf 'TARGET_DISK_SERIAL=%s\n' "$(read_disk_identity "$matched_name" serial)"
+        printf 'TARGET_DISK_PREPARED=true\n'
+    } >> "$state_file"
+    set_debconf partman-auto/disk "$matched_disk"
+    # With the USB stick attached, grub-pc otherwise asks where to install the
+    # BIOS boot loader. UEFI installs ignore this and use the ESP.
+    set_debconf grub-installer/bootdev "$matched_disk"
+}
+
+# Guided mode collects an exact inventory on the target; it never clears a disk.
+# The ordinary identity and reinstall gates run again just before partitioning.
+assert_single_guided_disk() {
+    guided_count=0
+    guided_disk=
+    guided_media_disk=$(boot_parent_disk)
+    for guided_path in "$sys_root"/class/block/*; do
+        candidate=${guided_path##*/}
+        case "$candidate" in loop*|ram*|fd*|sr*|dm-*|md*) continue ;; esac
+        [ ! -e "$guided_path/partition" ] || continue
+        [ "$(read_first_line "$guided_path/removable")" = 0 ] || continue
+        [ "$candidate" != "$guided_media_disk" ] || continue
+        disk_is_usb_backed "$candidate" && continue
+        # Do not ignore an internal disk just because its identity is unreadable.
+        if ! read_disk_identity "$candidate" model >/dev/null ||
+            ! read_disk_identity "$candidate" serial >/dev/null; then
+            fail "internal disk $candidate lacks a readable identity"
+        fi
+        assert_target_unmounted "$candidate"
+        guided_count=$((guided_count + 1))
+        guided_disk=$candidate
+    done
+    [ "$guided_count" -eq 1 ] || fail "found $guided_count internal disks; expected exactly one"
+}
+
+ask_guided() {
+    question=$1
+    db_set "$question" '' || fail "cannot clear installer answer"
+    db_fset "$question" seen false || fail "cannot reset installer question"
+    db_input critical "$question" || fail "installer question was not displayed"
+    db_go || fail "operator cancelled installation"
+    db_get "$question" || fail "cannot read installer answer"
+}
+
+capture_guided() {
+    db_x_loadtemplatefile "$media_dir/guided.templates" dns-appliance ||
+        fail "cannot load installer questions"
+    mkdir -p "$state_dir"
+    rm -f "$state_dir/erase-confirmation"
+    ask_guided dns-appliance/role
+    selected_role=$RET
+    case "$selected_role" in dns01|dns02|dns03) ;; *) fail "invalid DNS role" ;; esac
+    selected_profile=$media_dir/$selected_role.conf
+    [ -r "$selected_profile" ] || fail "missing role network profile"
+    validate_profile "$selected_profile" "$selected_role"
+    load_config "$selected_profile"
+    [ "$ROLE" = "$selected_role" ] || fail "network profile role mismatch"
+    [ "$DESTRUCTIVE_INSTALL_ENABLED" = false ] || fail "guided profiles must be disabled"
+
+    nic_choices=
+    for nic_path in "$sys_root"/class/net/*; do
+        nic=${nic_path##*/}
+        [ "$nic" != lo ] || continue
+        [ -e "$nic_path/device" ] || continue
+        [ ! -e "$nic_path/wireless" ] || continue
+        [ -r "$nic_path/address" ] || continue
+        case "$nic" in *[!a-zA-Z0-9_.-]*) fail "unsafe interface name" ;; esac
+        nic_choices=${nic_choices:+$nic_choices, }$nic
+    done
+    [ -n "$nic_choices" ] || fail "no wired physical network interface found"
+    db_subst dns-appliance/interface choices "$nic_choices"
+    ask_guided dns-appliance/interface
+    selected_nic=$RET
+    case ", $nic_choices, " in
+        *", $selected_nic, "*) ;;
+        *) fail "invalid wired interface" ;;
+    esac
+
+    assert_single_guided_disk
+    selected_disk=$guided_disk
+    selected_model=$(read_disk_identity "$selected_disk" model)
+    selected_serial=$(read_disk_identity "$selected_disk" serial)
+    selected_sectors=$(read_first_line "$sys_root/class/block/$selected_disk/size")
+    case "$selected_sectors" in ''|*[!0-9]*) fail "invalid disk size" ;; esac
+    [ "$selected_sectors" -gt 262144 ] || fail "target disk is too small"
+    selected_bytes=$((selected_sectors * 512))
+
+    inventory_dir=$state_dir/inventory
+    mkdir -p "$inventory_dir"
+    chmod 0700 "$inventory_dir"
+    for role in dns01 dns02 dns03; do
+        printf 'role=%s\ndestructive_install_enabled=false\n' "$role" > "$inventory_dir/$role.conf"
+    done
+    # Only approved network fields survive the public template. Hardware comes
+    # exclusively from this machine, never from an embedded placeholder.
+    awk -F= '$1 ~ /^(role|address|prefix_length|netmask|gateway|dns_servers|domain|lan_cidr|management_cidr|cluster_domain)$/ {print}' \
+        "$selected_profile" > "$inventory_dir/$selected_role.conf"
+    {
+        for item in product_name product_sku product_serial product_uuid; do
+            case "$item" in
+                product_name) field=product_name ;;
+                product_sku) field=product_sku ;;
+                product_serial) field=system_serial ;;
+                product_uuid) field=system_uuid ;;
+            esac
+            printf 'expected_%s_sha256=%s\n' "$field" \
+                "$(hash_value "$(read_first_line "$sys_root/class/dmi/id/$item")")"
+        done
+        printf 'expected_mac_sha256=%s\n' "$(hash_value "$(read_first_line "$sys_root/class/net/$selected_nic/address")")"
+        printf 'expected_disk_model_sha256=%s\n' "$(hash_value "$selected_model")"
+        printf 'expected_disk_serial_sha256=%s\n' "$(hash_value "$selected_serial")"
+        printf 'expected_disk_min_bytes=%s\nexpected_disk_bytes=%s\n' "$selected_bytes" "$selected_bytes"
+        printf 'expected_disk_name=%s\ndestructive_install_enabled=true\n' "$selected_disk"
+    } >> "$inventory_dir/$selected_role.conf"
+    match_node
+    confirmation="ERASE $ROLE /dev/$selected_disk $selected_serial $selected_bytes"
+    db_subst dns-appliance/erase role "$ROLE"
+    db_subst dns-appliance/erase address "$ADDRESS/$PREFIX_LENGTH"
+    db_subst dns-appliance/erase gateway "$GATEWAY"
+    db_subst dns-appliance/erase disk "/dev/$selected_disk"
+    db_subst dns-appliance/erase model "$selected_model"
+    db_subst dns-appliance/erase serial "$selected_serial"
+    db_subst dns-appliance/erase bytes "$selected_bytes"
+    db_subst dns-appliance/erase confirmation "$confirmation"
+    ask_guided dns-appliance/erase
+    [ "$RET" = "$confirmation" ] || fail "exact target-specific erase confirmation required"
+    printf '%s\n' "$confirmation" > "$state_dir/erase-confirmation"
+    chmod 0600 "$state_dir/erase-confirmation"
+    # The preseed early hook shares Debian Installer's frontend. STOP would
+    # disconnect main-menu after this child returns and leave a blank screen.
+}
+
+case "$install_mode" in
+    reviewed) ;;
+    guided) inventory_dir=$state_dir/inventory ;;
+    *) fail "unknown install mode" ;;
+esac
+
+# Source at script scope: confmodule may re-exec $0 with the phase arguments.
+if [ "$install_mode" = guided ] && [ "${1:-}" = identify ]; then
+    # shellcheck source=/dev/null
+    . "${DNS_INSTALLER_DEBCONF_MODULE:-/usr/share/debconf/confmodule}"
+fi
+
+case "${1:-}" in
+    validate-profile)
+        [ "$#" -eq 3 ] || fail "validate-profile requires a file and role"
+        validate_profile "$2" "$3"
+        ;;
+    identify)
+        if [ "$install_mode" = guided ]; then capture_guided; else match_node; fi
+        ;;
+    select-disk)
+        match_node
+        match_disk
+        ;;
+    *)
+        fail "unknown gate phase"
+        ;;
+esac

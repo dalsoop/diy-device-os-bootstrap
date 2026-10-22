@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dalsoop/diy-device-os-bootstrap/blob/main/engine/catalog/schemas/bootloader.schema.json",
+  "title": "Device OS Bootloader",
+  "type": "object",
+  "required": ["schema_version", "id", "implementation", "version", "archive_root", "source", "redistribution"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "id": { "$ref": "#/$defs/id" },
+    "implementation": { "$ref": "#/$defs/id" },
+    "version": { "type": "string", "minLength": 1 },
+    "archive_root": { "$ref": "#/$defs/safeRelativePath" },
+    "source": { "$ref": "#/$defs/source" },
+    "redistribution": { "$ref": "#/$defs/redistribution" }
+  },
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "redistribution": { "$ref": "#/$defs/personalUseOnly" }
+      }
+    },
+    { "$ref": "#/$defs/reviewedArtifactTuples" }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "httpsUrl": {
+      "type": "string",
+      "pattern": "^https://"
+    },
+    "safeRelativePath": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9](?:[A-Za-z0-9._+!/-]*[A-Za-z0-9._+!-])?$"
+    },
+    "source": {
+      "type": "object",
+      "required": ["kind", "filename", "url", "sha256"],
+      "properties": {
+        "kind": { "const": "locked-download" },
+        "filename": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+!-]*$"
+        },
+        "url": { "$ref": "#/$defs/httpsUrl" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "redistribution": {
+      "oneOf": [
+        { "$ref": "#/$defs/personalUseOnly" },
+        { "$ref": "#/$defs/redistributionReviewed" }
+      ]
+    },
+    "reviewedArtifactTuples": {
+      "oneOf": [
+        {
+          "properties": {
+            "id": { "const": "ventoy" },
+            "version": { "const": "1.1.18" },
+            "source": {
+              "properties": {
+                "url": { "const": "https://github.com/ventoy/Ventoy/releases/download/v1.1.18/ventoy-1.1.18-linux.tar.gz" },
+                "sha256": { "const": "d86ff9de63d94c8b8f1f6b14d23c55af4b88e8207bf2893890892a6a97b1ad54" }
+              }
+            },
+            "redistribution": {
+              "properties": {
+                "status": { "const": "redistribution-reviewed" },
+                "artifact_version": { "const": "1.1.18" },
+                "artifact_url": { "const": "https://github.com/ventoy/Ventoy/releases/download/v1.1.18/ventoy-1.1.18-linux.tar.gz" },
+                "artifact_sha256": { "const": "d86ff9de63d94c8b8f1f6b14d23c55af4b88e8207bf2893890892a6a97b1ad54" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "personalUseOnly": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "const": "personal-use-only" }
+      },
+      "additionalProperties": false
+    },
+    "redistributionReviewed": {
+      "type": "object",
+      "required": ["status", "artifact_version", "artifact_url", "artifact_sha256", "reviewed_at", "reviewer", "evidence", "obligations"],
+      "properties": {
+        "status": { "const": "redistribution-reviewed" },
+        "artifact_version": { "type": "string", "minLength": 1 },
+        "artifact_url": { "$ref": "#/$defs/httpsUrl" },
+        "artifact_sha256": { "$ref": "#/$defs/sha256" },
+        "reviewed_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "reviewer": { "type": "string", "minLength": 1 },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "obligations": { "$ref": "#/$defs/obligations" }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["kind", "url"],
+        "properties": {
+          "kind": { "enum": ["license", "notices", "corresponding-source", "trademark"] },
+          "url": { "$ref": "#/$defs/httpsUrl" }
+        },
+        "additionalProperties": false
+      },
+      "allOf": [
+        { "contains": { "type": "object", "properties": { "kind": { "const": "license" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "notices" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "corresponding-source" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "trademark" } }, "required": ["kind"] } }
+      ]
+    },
+    "obligations": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/obligation" },
+      "allOf": [
+        { "contains": { "type": "object", "properties": { "kind": { "const": "license-text" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "notices" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "corresponding-source" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "trademark" } }, "required": ["kind"] } }
+      ]
+    },
+    "obligation": {
+      "oneOf": [
+        { "$ref": "#/$defs/embeddedObligation" },
+        { "$ref": "#/$defs/bundleObligation" },
+        { "$ref": "#/$defs/notRequiredObligation" }
+      ]
+    },
+    "embeddedObligation": {
+      "type": "object",
+      "required": ["kind", "disposition", "location"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/obligationKind" },
+        "disposition": { "const": "embedded-artifact" },
+        "location": {
+          "allOf": [
+            { "$ref": "#/$defs/location" },
+            { "properties": { "scope": { "const": "artifact" } } }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "bundleObligation": {
+      "type": "object",
+      "required": ["kind", "disposition", "location"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/obligationKind" },
+        "disposition": { "const": "bundle-file" },
+        "location": {
+          "allOf": [
+            { "$ref": "#/$defs/location" },
+            { "properties": { "scope": { "const": "release-bundle" } } }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "notRequiredObligation": {
+      "type": "object",
+      "required": ["kind", "disposition"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/obligationKind" },
+        "disposition": { "const": "not-required" }
+      },
+      "additionalProperties": false
+    },
+    "obligationKind": {
+      "enum": ["license-text", "notices", "corresponding-source", "trademark"]
+    },
+    "location": {
+      "type": "object",
+      "required": ["scope", "path", "sha256"],
+      "properties": {
+        "scope": { "enum": ["artifact", "release-bundle"] },
+        "path": { "$ref": "#/$defs/safeRelativePath" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,66 @@
+#!/bin/bash
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -euo pipefail
+
+fail() {
+    echo "usb-media inspect-targets: $*" >&2
+    exit 1
+}
+
+mac_serial() {
+    local identifier=$1
+    ioreg -r -c IOUSBMassStorageInterfaceNub -l -w 0 | awk -v bsd="$identifier" '
+      /^\+-o IOUSBMassStorageInterfaceNub/ { serial="" }
+      /"kUSBSerialNumberString" = / && serial == "" {
+        value=$0
+        sub(/^.*"kUSBSerialNumberString" = "/, "", value)
+        sub(/".*$/, "", value)
+        serial=value
+      }
+      index($0, "\"BSD Name\" = \"" bsd "\"") && serial != "" {
+        result=serial
+      }
+      END { if (result != "") print result }
+    '
+}
+
+case "$(uname -s)" in
+    Darwin)
+        for command in diskutil plutil ioreg; do
+            command -v "$command" >/dev/null 2>&1 || fail "$command is required"
+        done
+        list=$(mktemp)
+        info=$(mktemp)
+        trap 'rm -f "$list" "$info"' EXIT HUP INT TERM
+        diskutil list -plist external physical > "$list"
+        while IFS= read -r identifier; do
+            device=/dev/$identifier
+            diskutil info -plist "$device" > "$info"
+            [ "$(plutil -extract WholeDisk raw -o - "$info")" = true ] || continue
+            [ "$(plutil -extract Internal raw -o - "$info")" = false ] || continue
+            [ "$(plutil -extract Removable raw -o - "$info")" = true ] || continue
+            [ "$(plutil -extract WritableMedia raw -o - "$info")" = true ] || continue
+            [ "$(plutil -extract VirtualOrPhysical raw -o - "$info")" = Physical ] || continue
+            media_name=$(plutil -extract MediaName raw -o - "$info")
+            bytes=$(plutil -extract TotalSize raw -o - "$info")
+            serial=$(mac_serial "$identifier")
+            [ -n "$serial" ] || fail "$device has no readable USB serial"
+            echo "$device | $media_name | $bytes bytes"
+            echo "  ERASE $device $media_name $serial $bytes"
+        done < <(plutil -extract WholeDisks json -o - "$list" | jq -r '.[]')
+        ;;
+    Linux)
+        command -v lsblk >/dev/null 2>&1 || fail "lsblk is required"
+        while read -r device type removable model serial bytes transport; do
+            [ "$type" = disk ] || continue
+            [ "$removable" = 1 ] || continue
+            [ "$transport" = usb ] || continue
+            [ -n "$serial" ] || fail "$device has no readable USB serial"
+            echo "$device | $model | $bytes bytes"
+            echo "  ERASE $device $serial"
+        done < <(lsblk -bdnPo NAME,TYPE,RM,MODEL,SERIAL,SIZE,TRAN |
+            sed -E 's/NAME="([^"]*)" TYPE="([^"]*)" RM="([^"]*)" MODEL="([^"]*)" SERIAL="([^"]*)" SIZE="([^"]*)" TRAN="([^"]*)"/\/dev\/\1 \2 \3 \4 \5 \6 \7/')
+        ;;
+    *) fail "only macOS and Linux are supported" ;;
+esac

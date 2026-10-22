@@ -1,0 +1,4 @@
+# debian-cd parses these task descriptions even for a headless image.
+# This build-only profile is not selected for installation on the appliance.
+task-desktop
+tasksel-data

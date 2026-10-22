@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dalsoop/diy-device-os-bootstrap/blob/main/engine/installer/schemas/enrollment-record.schema.json",
+  "title": "DNS appliance public enrollment record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generation_id",
+    "hostname",
+    "role",
+    "address",
+    "hardware",
+    "installer",
+    "ssh_host_key_fingerprints",
+    "certificate_fingerprints",
+    "health",
+    "completed_at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "generation_id": { "type": "string", "pattern": "^[0-9a-fA-F-]{36}$" },
+    "hostname": { "enum": ["dns01", "dns02", "dns03"] },
+    "role": { "enum": ["primary", "secondary"] },
+    "address": { "type": "string", "pattern": "^10\\.0\\.5\\.[123]$" },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product_name", "product_number", "system_serial", "system_uuid", "mac", "disk_model", "disk_serial"],
+      "properties": {
+        "product_name": { "type": "string" },
+        "product_number": { "type": "string" },
+        "system_serial": { "type": "string" },
+        "system_uuid": { "type": "string" },
+        "mac": { "type": "string" },
+        "disk_model": { "type": "string" },
+        "disk_serial": { "type": "string" }
+      }
+    },
+    "installer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build_id", "image_sha256"],
+      "properties": {
+        "build_id": { "type": "string" },
+        "image_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "ssh_host_key_fingerprints": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" }
+    },
+    "certificate_fingerprints": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dns_udp", "dns_tcp", "technitium", "cockpit", "ntp", "cluster", "ipv6_policy"],
+      "properties": {
+        "dns_udp": { "const": "healthy" },
+        "dns_tcp": { "const": "healthy" },
+        "technitium": { "const": "healthy" },
+        "cockpit": { "const": "healthy" },
+        "ntp": { "enum": ["healthy", "degraded-offline"] },
+        "cluster": { "enum": ["standalone", "joined"] },
+        "ipv6_policy": { "const": "disabled" }
+      }
+    },
+    "completed_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,0 +1,44 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+sys_root=${DNS_DISK_SYS_ROOT:-/sys}
+device_root=${DNS_DISK_DEVICE_ROOT:-/dev}
+ata_id_command=${DNS_DISK_ATA_ID_COMMAND:-/lib/udev/ata_id}
+[ "$#" -eq 2 ] || exit 2
+disk=$1
+field=$2
+case "$disk" in ''|*[!a-zA-Z0-9_.-]*|.|..) exit 2 ;; esac
+path=$sys_root/class/block/$disk
+[ -d "$path" ] && [ ! -e "$path/partition" ] || exit 1
+
+case "$field" in
+    model) value=$(sed -n '1p' "$path/device/model" 2>/dev/null) || exit 1 ;;
+    serial)
+        if [ -r "$path/device/serial" ]; then
+            value=$(sed -n '1p' "$path/device/serial")
+        elif [ -r "$path/serial" ]; then
+            value=$(sed -n '1p' "$path/serial")
+        else
+            # Linux's SATA SCSI layer exposes VPD pages, not device/serial.
+            # Debian Installer includes ata_id; probe the same exact disk.
+            properties=$("$ata_id_command" --export "$device_root/$disk" 2>/dev/null) || exit 1
+            value=$(printf '%s\n' "$properties" | awk -F= '
+                $1 == "ID_ATA" {ata++; is_ata=($2 == "1")}
+                $1 == "ID_TYPE" {type++; is_disk=($2 == "disk")}
+                $1 == "ID_SERIAL_SHORT" {serial++; value=substr($0,index($0,"=")+1)}
+                END {
+                    if (ata != 1 || !is_ata || type != 1 || !is_disk || serial != 1) exit 1
+                    print value
+                }
+            ') || exit 1
+        fi
+        ;;
+    *) exit 2 ;;
+esac
+# NVMe serials and SCSI models can be padded to a fixed-width kernel field.
+# Keep meaningful interior characters, but never ask a human to count padding.
+value=$(printf '%s' "$value" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+[ -n "$value" ] || exit 1
+printf '%s\n' "$value"

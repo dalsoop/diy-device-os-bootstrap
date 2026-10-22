@@ -1,0 +1,72 @@
+# Tests
+
+`install-gate-simulation.sh` runs the destructive-selection gate against an
+isolated fake sysfs tree. It never opens a real block device.
+
+The reviewed-mode cases cover:
+
+- one exact HP/NIC/disk match selecting `/dev/sda`;
+- wrong DMI identity stopping before selection;
+- an erase-disabled role stopping before selection;
+- two matching internal disks stopping as ambiguous;
+- an additional non-matching disk being ignored;
+- an undersized, removable, or USB-transport target being rejected;
+- direct and Ventoy-mapped installer media resolving to their physical parent;
+- the Ventoy backing disk never being selected as the target;
+- unresolved, ambiguous, multi-slave, cyclic, loop, and MD installer ancestry
+  failing closed;
+- direct, mapper-backed, and `/dev/disk/by-uuid` mounted targets being rejected;
+- active swap and unmounted sysfs holders on the target being rejected;
+- leading and trailing signature clearing, synchronization, and partition-table
+  refresh occurring only after acceptance;
+- two interfaces with the expected MAC stopping as ambiguous;
+- a completed role being blocked without a reinstall token;
+- a matching generation-bound reinstall token being accepted;
+- a stale reinstall token being rejected.
+
+`repository-contract.sh` validates immutable source lock shapes, required
+artifacts, executable modes, the enrollment schema, and the presence of the
+first-boot safety contracts. GitHub Actions runs the installer, management,
+Tailscale enrollment, media-catalog, and repository-contract simulations plus
+ShellCheck and Python syntax validation.
+
+`repository-contract.sh` also runs the documentation check over every tracked
+text file; `repository-contract.sh --documentation-only <checkout>` runs only
+that check. `documentation-check-simulation.sh` builds temporary Git fixtures
+with one failing and one passing case per documentation pattern and proves that
+a directory outside Git is rejected.
+
+`management-simulation.sh` covers machine-readable and audited DNS planning,
+saving a read-only plan only from a committed zone and never over an existing
+file, plan-bound apply that rejects a wrong confirmation, plan hash, endpoint,
+source commit, modified zone, live-zone drift, or replay without importing,
+generation-bound reinstall authorization, and
+the `/16` network prerequisite, generated first-boot recursion permissions for
+LAN and Tailscale clients, and the firewall's Tailscale source-address guard.
+It also verifies root-only environment-file permissions and bootstrap-password
+omission after enrollment. It stubs network calls and never contacts a DNS server.
+
+`media-catalog-simulation.sh` also checks capacity planning with
+checksum-matched sparse cache files, a runtime artifact with a matching
+manifest, an unknown runtime artifact, and a target smaller than the configured
+reserve plus overhead. It also proves that an oversized unverified estimate
+cannot produce a final too-small verdict when the verified subtotal still fits.
+It never opens a block device.
+
+`macos-writer-simulation.sh` replaces every macOS and block-device command with
+an isolated fixture. It proves that the writer verifies the image body before
+exposing the partition map, verifies the first MiB last, and does not commit or
+eject after a failed body readback. It never opens a real device.
+
+`inventory-wizard-simulation.sh` runs the guided capture against a fixture
+sysfs and mount table. It proves that only wired interfaces and internal,
+non-removable, non-USB disks other than the inventory medium are offered; that
+the one saved file holds hashes and `destructive_install_enabled=false`; and
+that a wrong confirmation, ended input, repeated invalid numbers, a non-root
+user, an unmounted or read-only medium, or a missing internal disk saves
+nothing. An existing file is replaced only after `overwrite`. It does not prove
+that Debian Live renders Hangul or that real HP sysfs values match the fixture.
+
+This simulation is necessary but not sufficient. It does not replace building
+the ISO, booting Debian Installer under BIOS and UEFI, or the physical `dns01`
+pilot.

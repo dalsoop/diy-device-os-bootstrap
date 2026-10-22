@@ -1,0 +1,17 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck source=/dev/null
+. "${DNS_INSTALLER_DEBCONF_MODULE:-/usr/share/debconf/confmodule}"
+
+# file-preseed runs before Debian's normal component/network detection step.
+# Load the offline components and detect the NIC before asking for its identity.
+db_set debconf/language ko
+anna-install simple-cdd-profiles fat-modules
+anna cdrom-retriever default
+modprobe vfat
+udpkg --configure ethdetect
+exec /bin/sh "$script_dir/install-gate" identify

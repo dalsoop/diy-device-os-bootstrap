@@ -1,0 +1,13 @@
+.dryforge/
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+engine/agent/.venv/
+
+engine/installer/artifacts/
+engine/installer/cache/
+engine/installer/work/
+engine/installer/dns-image/simple-cdd/generated/
+engine/installer/dns-image/simple-cdd/images/
+engine/installer/dns-image/simple-cdd/tmp/

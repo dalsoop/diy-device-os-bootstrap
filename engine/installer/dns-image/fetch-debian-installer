@@ -1,0 +1,54 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+# shellcheck disable=SC1091
+. "$repo_root/build/locks/sources.env"
+cache_dir=${DNS_APPLIANCE_CACHE_DIR:-$repo_root/cache}
+destination=$cache_dir/debian-installer-$DEBIAN_SNAPSHOT
+keyring=${DNS_APPLIANCE_DEBIAN_KEYRING:-/usr/share/keyrings/debian-archive-keyring.gpg}
+base=https://snapshot.debian.org/archive/debian/$DEBIAN_SNAPSHOT
+relative=main/installer-amd64/current/images/SHA256SUMS
+
+fail() { echo "fetch-debian-installer: $*" >&2; exit 1; }
+mkdir -p "$destination"
+temporary=$(mktemp -d "$destination/.verify.XXXXXX")
+trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+fetch() { curl --fail --location --proto '=https' --tlsv1.2 --output "$2" "$1"; }
+fetch "$base/dists/trixie/Release" "$temporary/Release"
+fetch "$base/dists/trixie/Release.gpg" "$temporary/Release.gpg"
+gpgv --keyring "$keyring" "$temporary/Release.gpg" "$temporary/Release" ||
+    fail 'Debian Release signature verification failed'
+digest=$(awk -v path="$relative" '
+    /^SHA256:/ {section=1; next}
+    /^[^ ]/ {section=0}
+    section && $3 == path {print $1}
+' "$temporary/Release")
+printf '%s' "$digest" | grep -Eq '^[0-9a-f]{64}$' || fail 'installer checksums absent from signed Release'
+fetch "$base/dists/trixie/$relative" "$temporary/SHA256SUMS"
+printf '%s  %s\n' "$digest" "$temporary/SHA256SUMS" | sha256sum -c - ||
+    fail 'installer checksum list differs from signed Release'
+
+images=$destination/installer-amd64/current/images
+mkdir -p "$images/cdrom/gtk"
+for file in cdrom/initrd.gz cdrom/vmlinuz cdrom/debian-cd_info.tar.gz \
+    cdrom/gtk/initrd.gz cdrom/gtk/vmlinuz cdrom/gtk/debian-cd_info.tar.gz; do
+    digest=$(awk -v path="./$file" '$2 == path {print $1}' "$temporary/SHA256SUMS")
+    printf '%s' "$digest" | grep -Eq '^[0-9a-f]{64}$' || fail "missing digest for $file"
+    if [ -e "$images/$file" ]; then
+        printf '%s  %s\n' "$digest" "$images/$file" | sha256sum -c - ||
+            fail "cached installer component digest mismatch: $file"
+    else
+        fetch "$base/dists/trixie/main/installer-amd64/current/images/$file" "$temporary/component"
+        printf '%s  %s\n' "$digest" "$temporary/component" | sha256sum -c - ||
+            fail "downloaded installer component digest mismatch: $file"
+        mv "$temporary/component" "$images/$file"
+    fi
+done
+install -m 0644 "$temporary/Release" "$destination/Release"
+install -m 0644 "$temporary/Release.gpg" "$destination/Release.gpg"
+install -m 0644 "$temporary/SHA256SUMS" "$images/SHA256SUMS"
+echo "verified Debian amd64 installer: $destination"

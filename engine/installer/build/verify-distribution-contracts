@@ -1,0 +1,343 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+policy=$script_dir/distribution-policy.json
+build_manifest_schema=$script_dir/../schemas/dns-build-manifest.schema.json
+registry=
+component_review=
+final_review=
+build_manifest=
+sbom=
+
+fail() {
+    echo "verify-distribution-contracts: $*" >&2
+    exit 1
+}
+
+usage() {
+    fail "usage: verify-distribution-contracts --registry FILE [--policy FILE] [--component-review FILE --sbom FILE] [--final-review FILE --build-manifest FILE --sbom FILE]"
+}
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        fail "a SHA-256 tool is required"
+    fi
+}
+
+validate_sbom() {
+    jq -e '
+      def exact_keys($expected): (keys | sort) == ($expected | sort);
+      def nonempty: type == "string" and length > 0;
+      def package:
+        (exact_keys(["name","versionInfo","SPDXID","downloadLocation","filesAnalyzed","licenseDeclared","licenseConcluded","copyrightText"]) or
+         exact_keys(["name","versionInfo","SPDXID","downloadLocation","filesAnalyzed","licenseDeclared","licenseConcluded","copyrightText","comment"])) and
+        (.name | nonempty) and (.versionInfo | nonempty) and
+        (.SPDXID | type == "string" and test("^SPDXRef-[A-Za-z0-9.-]+$")) and
+        (.downloadLocation | nonempty) and .filesAnalyzed == false and
+        (.licenseDeclared | nonempty) and (.licenseConcluded | nonempty) and
+        (.copyrightText | nonempty) and
+        ((has("comment") | not) or (.comment | nonempty));
+      ["SPDXRef-DebianPackageClosure","SPDXRef-Technitium","SPDXRef-Tailscale","SPDXRef-TailscaleDependencyReport","SPDXRef-DIYDeviceOSBootstrap"] as $described |
+      exact_keys(["spdxVersion","dataLicense","SPDXID","name","documentNamespace","creationInfo","documentDescribes","packages"]) and
+      .spdxVersion == "SPDX-2.3" and .dataLicense == "CC0-1.0" and
+      .SPDXID == "SPDXRef-DOCUMENT" and
+      (.name | type == "string" and startswith("dns-appliance-installer-") and length > 25) and
+      (.documentNamespace | type == "string" and startswith("https://")) and
+      (.creationInfo | exact_keys(["created","creators"])) and
+      (.creationInfo.created | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+      (.creationInfo.creators | type == "array" and length > 0 and all(.[]; type == "string" and length > 0)) and
+      .documentDescribes == $described and
+      (.packages | type == "array" and length >= 5 and all(.[]; package)) and
+      (([.packages[].SPDXID] | length) == ([.packages[].SPDXID] | unique | length)) and
+      ([.packages[].SPDXID] as $ids | all($described[]; . as $id | $ids | index($id) != null))
+    ' "$1" >/dev/null || fail "SPDX SBOM does not match the expected DNS document shape"
+}
+
+validate_build_manifest() {
+    [ -r "$build_manifest_schema" ] ||
+        fail "DNS build-manifest schema is not readable: $build_manifest_schema"
+    jq -e --slurpfile schema "$build_manifest_schema" '
+      def exact_keys($expected): (keys | sort) == ($expected | sort);
+      def digest: type == "string" and test("^[a-f0-9]{64}$");
+      def status: . == "personal-use-only" or . == "redistribution-reviewed";
+      def component_status($id):
+        exact_keys(["id","status"]) and .id == $id and (.status | status);
+      ["schema_version","artifact_id","build_id","install_mode","iso","iso_sha256","distribution_status","component_registry","component_registry_sha256","distribution_policy_sha256","components","sbom","sbom_sha256","debian_point_release","debian_snapshot","technitium_version","technitium_image_digest","technitium_archive_sha256","tailscale_version","tailscale_archive_sha256","source_revision","source_repository","source_archive"] as $fields |
+      ($schema[0]["$id"] | endswith("/engine/installer/schemas/dns-build-manifest.schema.json")) and
+      $schema[0].additionalProperties == false and
+      (($schema[0].required | sort) == ($fields | sort)) and
+      (($schema[0].properties | keys | sort) == ($fields | sort)) and
+      exact_keys($fields) and
+      .schema_version == 1 and .artifact_id == "dns-appliance" and
+      (.build_id | type == "string" and length > 0) and
+      (.install_mode == "reviewed" or .install_mode == "guided") and
+      (.iso | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._+-]*\\.iso$")) and
+      (.iso_sha256 | digest) and (.distribution_status | status) and
+      .component_registry == "component-redistribution-registry.json" and
+      (.component_registry_sha256 | digest) and (.distribution_policy_sha256 | digest) and
+      (.components | type == "array" and length == 5) and
+      (.components[0] | component_status("debian-package-closure")) and
+      (.components[1] | component_status("technitium-oci")) and
+      (.components[2] | component_status("tailscale-archive")) and
+      (.components[3] | component_status("tailscale-dependency-report")) and
+      (.components[4] | component_status("repository-source-snapshot")) and
+      .sbom == "sbom.spdx.json" and (.sbom_sha256 | digest) and
+      (.debian_point_release | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+      (.debian_snapshot | test("^[0-9]{8}T[0-9]{6}Z$")) and
+      (.technitium_version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+      (.technitium_image_digest | test("^sha256:[a-f0-9]{64}$")) and
+      (.technitium_archive_sha256 | digest) and
+      (.tailscale_version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+      (.tailscale_archive_sha256 | digest) and
+      (.source_revision | type == "string" and test("^[a-f0-9]{40}$")) and
+      .source_repository == "https://github.com/dalsoop/diy-device-os-bootstrap" and
+      .source_archive == (.source_repository + "/archive/" + .source_revision + ".tar.gz")
+    ' "$1" >/dev/null || fail "build manifest does not satisfy dns-build-manifest.schema.json"
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --registry|--policy|--component-review|--final-review|--build-manifest|--sbom)
+            [ "$#" -ge 2 ] || usage
+            case "$1" in
+                --registry) registry=$2 ;;
+                --policy) policy=$2 ;;
+                --component-review) component_review=$2 ;;
+                --final-review) final_review=$2 ;;
+                --build-manifest) build_manifest=$2 ;;
+                --sbom) sbom=$2 ;;
+            esac
+            shift 2
+            ;;
+        *) usage ;;
+    esac
+done
+
+command -v jq >/dev/null 2>&1 || fail "jq is required"
+[ -n "$registry" ] || usage
+[ -r "$registry" ] || fail "component registry is not readable: $registry"
+[ -r "$policy" ] || fail "distribution policy is not readable: $policy"
+
+jq -e '
+  def exact_keys($expected): (keys | sort) == ($expected | sort);
+  .schema_version == 1 and
+  (exact_keys(["schema_version","id","component_ids","statuses","evidence_kinds","obligation_kinds"])) and
+  .id == "dns-composite-image-redistribution-v1" and
+  .component_ids == ["debian-package-closure","technitium-oci","tailscale-archive","tailscale-dependency-report","repository-source-snapshot"] and
+  .statuses == ["personal-use-only","redistribution-reviewed"] and
+  .evidence_kinds == ["license","notices","corresponding-source","trademark"] and
+  .obligation_kinds == ["license-text","notices","corresponding-source","trademark"]
+' "$policy" >/dev/null || fail "distribution policy is malformed"
+
+policy_sha256=$(sha256_file "$policy")
+
+jq -e --slurpfile policy "$policy" '
+  def exact_keys($expected): (keys | sort) == ($expected | sort);
+  def digest: type == "string" and test("^[a-f0-9]{64}$");
+  def safe_id: type == "string" and test("^[a-z0-9][a-z0-9-]*$");
+  def safe_path:
+    type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._+/-]*$") and
+    (startswith("/") | not) and
+    (split("/") | all(. != "" and . != "." and . != ".."));
+  def source_identity:
+    exact_keys(["kind","value"]) and
+    .kind == "oci-digest" and
+    (.value | test("^sha256:[a-f0-9]{64}$"));
+  def evidence_entry:
+    exact_keys(["kind","url"]) and
+    (.kind as $kind | $policy[0].evidence_kinds | index($kind) != null) and
+    (.url | type == "string" and startswith("https://"));
+  def location($scope):
+    exact_keys(["scope","path","sha256"]) and .scope == $scope and
+    (.path | safe_path) and (.sha256 | digest);
+  def obligation_entry:
+    (.kind as $kind | $policy[0].obligation_kinds | index($kind) != null) and
+    if .disposition == "embedded-artifact" then
+      exact_keys(["kind","disposition","location"]) and (.location | location("artifact"))
+    elif .disposition == "bundle-file" then
+      exact_keys(["kind","disposition","location"]) and (.location | location("release-bundle"))
+    elif .disposition == "not-required" then
+      exact_keys(["kind","disposition"])
+    else false end;
+  def reviewed($parent):
+    .schema_version == 1 and .status == "redistribution-reviewed" and
+    (if $parent | has("source_identity") then
+       exact_keys(["schema_version","status","component_id","component_version","artifact_sha256","source_identity","reviewed_at","reviewer","evidence","obligations"]) and
+       (.source_identity | source_identity) and
+       .source_identity == $parent.source_identity
+     else
+       exact_keys(["schema_version","status","component_id","component_version","artifact_sha256","reviewed_at","reviewer","evidence","obligations"])
+     end) and
+    .component_id == $parent.id and
+    .component_version == $parent.version and
+    .artifact_sha256 == $parent.digest.value and
+    (.reviewed_at | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and
+    (.reviewer | type == "string" and length > 0) and
+    (.evidence | type == "array" and length >= 4 and all(.[]; evidence_entry)) and
+    ([.evidence[].kind] as $kinds | all($policy[0].evidence_kinds[]; . as $kind | $kinds | index($kind) != null)) and
+    (.obligations | type == "array" and length == 4 and all(.[]; obligation_entry)) and
+    ([.obligations[].kind] | sort) == ($policy[0].obligation_kinds | sort);
+  def component:
+    (.id | safe_id) and
+    (.version | type == "string" and length > 0) and
+    (.digest | exact_keys(["algorithm","value"])) and
+    .digest.algorithm == "sha256" and (.digest.value | digest) and
+    (if .id == "technitium-oci" then
+       exact_keys(["id","version","digest","source_identity","redistribution"]) and
+       (.source_identity | source_identity)
+     else
+       exact_keys(["id","version","digest","redistribution"])
+     end) and
+    (. as $parent |
+      .redistribution |
+      (exact_keys(["status"]) and .status == "personal-use-only") or
+      reviewed($parent));
+  .schema_version == 1 and
+  exact_keys(["schema_version","artifact_id","components"]) and
+  .artifact_id == "dns-appliance" and
+  (.components | type == "array" and length == 5 and all(.[]; component)) and
+  ([.components[].id] == $policy[0].component_ids) and
+  (([.components[].id] | length) == ([.components[].id] | unique | length))
+' "$registry" >/dev/null || fail "component registry is malformed or does not match policy"
+
+if [ -n "$component_review" ]; then
+    [ -z "$final_review" ] || fail "component and final review modes are mutually exclusive"
+    [ -r "$component_review" ] || fail "component review is not readable: $component_review"
+    { [ -n "$sbom" ] && [ -r "$sbom" ]; } || fail "component review requires a readable SPDX SBOM"
+    validate_sbom "$sbom"
+
+    component_id=$(jq -er '.component_id' "$component_review") ||
+        fail "component review is missing component_id"
+    parent=$(jq -c --arg id "$component_id" '.components[] | select(.id == $id)' "$registry")
+    [ -n "$parent" ] || fail "component review names an unknown component: $component_id"
+
+    jq -e --argjson parent "$parent" --slurpfile policy "$policy" '
+      def exact_keys($expected): (keys | sort) == ($expected | sort);
+      def digest: type == "string" and test("^[a-f0-9]{64}$");
+      def safe_path:
+        type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._+/-]*$") and
+        (startswith("/") | not) and
+        (split("/") | all(. != "" and . != "." and . != ".."));
+      def evidence_entry:
+        exact_keys(["kind","url"]) and
+        (.kind as $kind | $policy[0].evidence_kinds | index($kind) != null) and
+        (.url | type == "string" and startswith("https://"));
+      def location($scope):
+        exact_keys(["scope","path","sha256"]) and .scope == $scope and
+        (.path | safe_path) and (.sha256 | digest);
+      def obligation_entry:
+        (.kind as $kind | $policy[0].obligation_kinds | index($kind) != null) and
+        if .disposition == "embedded-artifact" then
+          exact_keys(["kind","disposition","location"]) and (.location | location("artifact"))
+        elif .disposition == "bundle-file" then
+          exact_keys(["kind","disposition","location"]) and (.location | location("release-bundle"))
+        elif .disposition == "not-required" then
+          exact_keys(["kind","disposition"])
+        else false end;
+      .schema_version == 1 and .status == "redistribution-reviewed" and
+      (if $parent | has("source_identity") then
+         exact_keys(["schema_version","status","component_id","component_version","artifact_sha256","source_identity","reviewed_at","reviewer","evidence","obligations"]) and
+         .source_identity == $parent.source_identity
+       else
+         exact_keys(["schema_version","status","component_id","component_version","artifact_sha256","reviewed_at","reviewer","evidence","obligations"])
+       end) and
+      .component_id == $parent.id and
+      .component_version == $parent.version and
+      .artifact_sha256 == $parent.digest.value and
+      (.reviewed_at | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and
+      (.reviewer | type == "string" and length > 0) and
+      (.evidence | type == "array" and length >= 4 and all(.[]; evidence_entry)) and
+      ([.evidence[].kind] as $kinds | all($policy[0].evidence_kinds[]; . as $kind | $kinds | index($kind) != null)) and
+      (.obligations | type == "array" and length == 4 and all(.[]; obligation_entry)) and
+      ([.obligations[].kind] | sort) == ($policy[0].obligation_kinds | sort)
+    ' "$component_review" >/dev/null || fail "component review is incomplete or does not bind its parent component"
+
+    jq -e '[.. | strings | ascii_upcase | select(contains("NOASSERTION"))] | length == 0' "$sbom" >/dev/null ||
+        fail "NOASSERTION blocks component reviewed status"
+fi
+
+if [ -n "$final_review" ]; then
+    [ -z "$component_review" ] || fail "component and final review modes are mutually exclusive"
+    [ -r "$final_review" ] || fail "final review is not readable: $final_review"
+    { [ -n "$build_manifest" ] && [ -r "$build_manifest" ]; } ||
+        fail "final review requires a readable build manifest"
+    { [ -n "$sbom" ] && [ -r "$sbom" ]; } || fail "final review requires a readable SPDX SBOM"
+
+    validate_build_manifest "$build_manifest"
+    validate_sbom "$sbom"
+
+    registry_sha256=$(sha256_file "$registry")
+    manifest_sha256=$(sha256_file "$build_manifest")
+    sbom_sha256=$(sha256_file "$sbom")
+    expected_sbom_sha256=$(jq -er '.sbom_sha256' "$build_manifest") ||
+        fail "build manifest is missing sbom_sha256"
+    [ "$sbom_sha256" = "$expected_sbom_sha256" ] ||
+        fail "SPDX SBOM SHA-256 does not match the build manifest"
+    jq -e --slurpfile manifest "$build_manifest" '
+      .name == ("dns-appliance-installer-" + $manifest[0].build_id) and
+      .documentNamespace == ($manifest[0].source_repository + "/sbom/" + $manifest[0].source_revision + "/" + .name)
+    ' "$sbom" >/dev/null || fail "SPDX SBOM identity does not match the build manifest"
+
+    jq -e \
+        --arg registry_sha256 "$registry_sha256" \
+        --arg manifest_sha256 "$manifest_sha256" \
+        --arg policy_sha256 "$policy_sha256" \
+        --slurpfile policy "$policy" \
+        --slurpfile registry "$registry" \
+        --slurpfile manifest "$build_manifest" '
+      def exact_keys($expected): (keys | sort) == ($expected | sort);
+      def digest: type == "string" and test("^[a-f0-9]{64}$");
+      def safe_path:
+        type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._+/-]*$") and
+        (startswith("/") | not) and
+        (split("/") | all(. != "" and . != "." and . != ".."));
+      def evidence_entry:
+        exact_keys(["kind","url"]) and
+        (.kind as $kind | $policy[0].evidence_kinds | index($kind) != null) and
+        (.url | type == "string" and startswith("https://"));
+      def location($scope):
+        exact_keys(["scope","path","sha256"]) and .scope == $scope and
+        (.path | safe_path) and (.sha256 | digest);
+      def obligation_entry:
+        (.kind as $kind | $policy[0].obligation_kinds | index($kind) != null) and
+        if .disposition == "embedded-artifact" then
+          exact_keys(["kind","disposition","location"]) and (.location | location("artifact"))
+        elif .disposition == "bundle-file" then
+          exact_keys(["kind","disposition","location"]) and (.location | location("release-bundle"))
+        elif .disposition == "not-required" then
+          exact_keys(["kind","disposition"])
+        else false end;
+      .schema_version == 1 and
+      exact_keys(["schema_version","artifact","inputs","reviewed_at","reviewer","evidence","obligations"]) and
+      (.artifact | exact_keys(["id","sha256"])) and
+      .artifact.id == "dns-appliance" and
+      .artifact.sha256 == $manifest[0].iso_sha256 and
+      (.inputs | exact_keys(["component_registry_sha256","build_manifest_sha256"])) and
+      .inputs.component_registry_sha256 == $registry_sha256 and
+      .inputs.component_registry_sha256 == $manifest[0].component_registry_sha256 and
+      .inputs.build_manifest_sha256 == $manifest_sha256 and
+      $manifest[0].artifact_id == .artifact.id and
+      $manifest[0].distribution_status == "redistribution-reviewed" and
+      $manifest[0].distribution_policy_sha256 == $policy_sha256 and
+      ($registry[0].components | all(.redistribution.status == "redistribution-reviewed")) and
+      ($manifest[0].components == ($registry[0].components | map({id,status:.redistribution.status}))) and
+      (.reviewed_at | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and
+      (.reviewer | type == "string" and length > 0) and
+      (.evidence | type == "array" and length >= 4 and all(.[]; evidence_entry)) and
+      ([.evidence[].kind] as $kinds | all($policy[0].evidence_kinds[]; . as $kind | $kinds | index($kind) != null)) and
+      (.obligations | type == "array" and length == 4 and all(.[]; obligation_entry)) and
+      ([.obligations[].kind] | sort) == ($policy[0].obligation_kinds | sort)
+    ' "$final_review" >/dev/null || fail "final review is incomplete or does not bind the DNS artifact"
+
+    jq -e '[.. | strings | ascii_upcase | select(contains("NOASSERTION"))] | length == 0' "$sbom" >/dev/null ||
+        fail "NOASSERTION blocks final reviewed status"
+fi
+
+echo "distribution contracts: valid"

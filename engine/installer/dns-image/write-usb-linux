@@ -1,0 +1,180 @@
+#!/bin/bash
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -euo pipefail
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+license_checker=${DEVICE_OS_LICENSE_CHECKER:-$repo_root/usb-media/check-license-policy}
+distribution_policy=$repo_root/usb-media/distribution-policy.json
+device=
+iso=
+manifest=
+registry=
+sbom=
+review=
+confirmation=
+usage() {
+    echo "usage: sudo $0 --device /dev/sdX --iso image.iso --manifest build-manifest.json --registry component-redistribution-registry.json --sbom sbom.spdx.json [--review dns-final-review-record.json] --confirm 'ERASE /dev/sdX'" >&2
+    exit 2
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --device) device=${2:-}; shift 2 ;;
+        --iso) iso=${2:-}; shift 2 ;;
+        --manifest) manifest=${2:-}; shift 2 ;;
+        --registry) registry=${2:-}; shift 2 ;;
+        --sbom) sbom=${2:-}; shift 2 ;;
+        --review) review=${2:-}; shift 2 ;;
+        --confirm) confirmation=${2:-}; shift 2 ;;
+        *) usage ;;
+    esac
+done
+
+[ "$(uname -s)" = Linux ] || { echo "write-usb-linux: Linux is required" >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "write-usb-linux: run as root" >&2; exit 1; }
+[ -x "$license_checker" ] || { echo "write-usb-linux: shared license checker is unavailable" >&2; exit 1; }
+license_decision=$(mktemp)
+trap 'rm -f "$license_decision"' EXIT HUP INT TERM
+if ! DEVICE_OS_DISTRIBUTION_POLICY=$distribution_policy \
+    "$license_checker" --mode personal-use --json > "$license_decision"; then
+    echo "write-usb-linux: personal-use license policy denied DNS media writing" >&2
+    exit 1
+fi
+jq -e '
+  keys == ["blockers","decision","mode","schema_version","selected_artifacts","warnings"] and
+  .schema_version == 1 and .mode == "personal-use" and .decision == "allow" and .blockers == [] and
+  (.selected_artifacts | type == "array" and length > 0 and all(.[];
+    keys == ["id","kind","sha256","status"] and
+    (.id | test("^[a-z0-9][a-z0-9-]*$")) and
+    (.kind == "bootloader" or .kind == "catalog-entry" or .kind == "runtime-artifact" or
+      .kind == "component" or .kind == "final-artifact") and
+    (.status == "personal-use-only" or .status == "redistribution-reviewed") and
+    (.sha256 == null or (.sha256 | test("^[a-f0-9]{64}$"))))) and
+  (.warnings | type == "array" and all(.[];
+    keys == ["artifact_id","code","message"] and
+    (.artifact_id == null or (.artifact_id | test("^[a-z0-9][a-z0-9-]*$"))) and
+    (.code | test("^[a-z0-9][a-z0-9-]*$")) and (.message | type == "string" and length > 0)))
+' "$license_decision" >/dev/null || {
+    echo "write-usb-linux: personal-use license decision is malformed" >&2
+    exit 1
+}
+rm -f "$license_decision"
+trap - EXIT HUP INT TERM
+if ! { [ -f "$iso" ] && [ ! -L "$iso" ] &&
+       [ -f "$manifest" ] && [ ! -L "$manifest" ] &&
+       [ -f "$registry" ] && [ ! -L "$registry" ] &&
+       [ -f "$sbom" ] && [ ! -L "$sbom" ]; }; then
+    usage
+fi
+
+"$repo_root/build/verify-distribution-contracts" --registry "$registry" >/dev/null
+registry_sha=$(sha256sum "$registry" | awk '{print $1}')
+sbom_sha=$(sha256sum "$sbom" | awk '{print $1}')
+policy_sha=$(sha256sum "$repo_root/build/distribution-policy.json" | awk '{print $1}')
+jq -e --arg registry_sha "$registry_sha" --arg sbom_sha "$sbom_sha" --arg policy_sha "$policy_sha" \
+    --slurpfile registry "$registry" '
+  def exact_keys($expected): (keys | sort) == ($expected | sort);
+  ["schema_version","artifact_id","build_id","install_mode","iso","iso_sha256","distribution_status","component_registry","component_registry_sha256","distribution_policy_sha256","components","sbom","sbom_sha256","debian_point_release","debian_snapshot","technitium_version","technitium_image_digest","technitium_archive_sha256","tailscale_version","tailscale_archive_sha256","source_revision","source_repository","source_archive"] as $fields |
+  exact_keys($fields) and .schema_version == 1 and .artifact_id == "dns-appliance" and
+  (.distribution_status == "personal-use-only" or .distribution_status == "redistribution-reviewed") and
+  .component_registry == "component-redistribution-registry.json" and .component_registry_sha256 == $registry_sha and
+  .distribution_policy_sha256 == $policy_sha and
+  .components == ($registry[0].components | map({id,status:.redistribution.status})) and
+  .sbom == "sbom.spdx.json" and .sbom_sha256 == $sbom_sha
+' "$manifest" >/dev/null || { echo "write-usb-linux: DNS distribution manifest is invalid" >&2; exit 1; }
+jq -e '.spdxVersion == "SPDX-2.3" and .dataLicense == "CC0-1.0" and (.packages | type == "array" and length >= 5)' \
+    "$sbom" >/dev/null || { echo "write-usb-linux: DNS SPDX SBOM is invalid" >&2; exit 1; }
+distribution_status=$(jq -er '.distribution_status' "$manifest")
+if [ "$distribution_status" = redistribution-reviewed ]; then
+    { [ -f "$review" ] && [ ! -L "$review" ]; } || { echo "write-usb-linux: reviewed DNS image requires exact final review" >&2; exit 1; }
+    "$repo_root/build/verify-distribution-contracts" \
+        --registry "$registry" --final-review "$review" \
+        --build-manifest "$manifest" --sbom "$sbom" >/dev/null
+elif [ -n "$review" ]; then
+    echo "write-usb-linux: personal-use image does not accept an unrequired final review" >&2
+    exit 1
+fi
+
+expected_sha=$(jq -er '.iso_sha256' "$manifest")
+actual_sha=$(sha256sum "$iso" | awk '{print $1}')
+[ "$actual_sha" = "$expected_sha" ] || { echo "write-usb-linux: ISO checksum mismatch" >&2; exit 1; }
+
+[ -b "$device" ] || usage
+[ "$(lsblk -dnro TYPE "$device")" = disk ] || { echo "write-usb-linux: whole disk required" >&2; exit 1; }
+[ "$confirmation" = "ERASE $device" ] || { echo "write-usb-linux: exact erase confirmation required" >&2; exit 1; }
+
+root_source=$(findmnt -nro SOURCE /)
+root_parent=/dev/$(lsblk -no PKNAME "$root_source" 2>/dev/null | sed -n '1p')
+[ "$device" != "$root_parent" ] || { echo "write-usb-linux: refusing root disk" >&2; exit 1; }
+[ "$(lsblk -dnro RM "$device")" = 1 ] || { echo "write-usb-linux: target is not reported removable" >&2; exit 1; }
+
+iso_bytes=$(stat -c %s "$iso")
+device_bytes=$(blockdev --getsize64 "$device")
+[ "$device_bytes" -gt $((iso_bytes + 268435456)) ] || {
+    echo "write-usb-linux: USB needs at least 256 MiB after the ISO" >&2
+    exit 1
+}
+
+while read -r partition; do
+    if [ -n "$partition" ]; then
+        umount "$partition" 2>/dev/null || true
+    fi
+done < <(lsblk -nrpo NAME,TYPE "$device" | awk '$2 == "part" { print $1 }')
+
+dd if="$iso" of="$device" bs=4M conv=fsync status=progress
+blockdev --rereadpt "$device" || true
+udevadm settle
+
+sector_size=$(blockdev --getss "$device")
+last_sector=$(sfdisk -J "$device" | jq '[.partitiontable.partitions[] | .start + .size] | max')
+start=$(( (last_sector + 2047) / 2048 * 2048 ))
+total_sectors=$((device_bytes / sector_size))
+[ $((total_sectors - start)) -gt 131072 ] || {
+    echo "write-usb-linux: insufficient aligned space for DNS-ENROLL" >&2
+    exit 1
+}
+
+label=$(sfdisk -J "$device" | jq -r '.partitiontable.label')
+case "$label" in
+    gpt) partition_type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 ;;
+    dos) partition_type=c ;;
+    *) echo "write-usb-linux: unsupported partition table $label" >&2; exit 1 ;;
+esac
+
+printf 'start=%s, type=%s\n' "$start" "$partition_type" | sfdisk --append "$device"
+blockdev --rereadpt "$device"
+udevadm settle
+partition=$(lsblk -nrpo NAME,TYPE,START "$device" | awk -v start="$start" '$2 == "part" && $3 == start { print $1 }')
+[ -b "$partition" ] || { echo "write-usb-linux: new enrollment partition not found" >&2; exit 1; }
+mkfs.vfat -F 32 -n DNS-ENROLL "$partition"
+
+mount_dir=$(mktemp -d /mnt/dns-enroll.XXXXXX)
+cleanup() {
+    if mountpoint -q "$mount_dir"; then
+        umount "$mount_dir" || true
+    fi
+    rmdir "$mount_dir" 2>/dev/null || true
+}
+trap cleanup EXIT HUP INT TERM
+mount -o nodev,nosuid,noexec,umask=0077 "$partition" "$mount_dir"
+install -d -m 0700 "$mount_dir/records" "$mount_dir/reinstall" "$mount_dir/manifests"
+jq '{schema_version:1,build_id:.build_id,image_sha256:.iso_sha256,debian_point_release,technitium_version,technitium_image_digest,tailscale_version,tailscale_archive_sha256}' \
+    "$manifest" > "$mount_dir/installer.json"
+install -m 0600 "$manifest" "$mount_dir/manifests/dns-build-manifest.json"
+install -m 0600 "$registry" "$mount_dir/manifests/dns-component-redistribution-registry.json"
+install -m 0600 "$sbom" "$mount_dir/manifests/dns-sbom.spdx.json"
+if [ -n "$review" ]; then
+    install -m 0600 "$review" "$mount_dir/manifests/dns-final-review-record.json"
+fi
+(cd "$mount_dir" && find installer.json manifests -type f -exec sha256sum {} + | LC_ALL=C sort > CHECKSUMS.SHA256)
+sync -f "$mount_dir"
+umount "$mount_dir"
+
+cmp -n "$iso_bytes" "$iso" "$device"
+mount -o ro,nodev,nosuid,noexec "$partition" "$mount_dir"
+(cd "$mount_dir" && sha256sum -c CHECKSUMS.SHA256)
+umount "$mount_dir"
+echo "write-usb-linux: verified installer bytes and created DNS-ENROLL on $partition"
+echo "write-usb-linux: target remains $device; eject it before unplugging"

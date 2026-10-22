@@ -1,0 +1,158 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+catalog=${1:-${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}}
+
+fail() {
+    echo "usb-media verify-catalog: $*" >&2
+    exit 1
+}
+
+command -v jq >/dev/null 2>&1 || fail "jq is required"
+[ -r "$catalog" ] || fail "catalog is not readable: $catalog"
+
+jq -e '
+  def safe_id: type == "string" and test("^[a-z0-9][a-z0-9-]*$");
+  def safe_rel:
+    type == "string" and
+    test("^[A-Za-z0-9][A-Za-z0-9._+!/-]*$") and
+    (startswith("/") | not) and
+    (split("/") | all(. != "" and . != "." and . != ".."));
+  def digest: type == "string" and test("^[a-f0-9]{64}$");
+  def exact_keys($expected): (keys | sort) == ($expected | sort);
+  def evidence:
+    type == "array" and length >= 4 and all(.[];
+      exact_keys(["kind","url"]) and
+      (.kind == "license" or .kind == "notices" or .kind == "corresponding-source" or .kind == "trademark") and
+      (.url | type == "string" and startswith("https://"))) and
+    ([.[].kind] as $kinds |
+      all(["license","notices","corresponding-source","trademark"][]; . as $kind | $kinds | index($kind) != null));
+  def location($scope):
+    exact_keys(["scope","path","sha256"]) and .scope == $scope and
+    (.path | safe_rel) and (.sha256 | digest);
+  def obligation:
+    (.kind == "license-text" or .kind == "notices" or .kind == "corresponding-source" or .kind == "trademark") and
+    if .disposition == "embedded-artifact" then
+      exact_keys(["kind","disposition","location"]) and (.location | location("artifact"))
+    elif .disposition == "bundle-file" then
+      exact_keys(["kind","disposition","location"]) and (.location | location("release-bundle"))
+    elif .disposition == "not-required" then
+      exact_keys(["kind","disposition"])
+    else false end;
+  def redistribution:
+    (exact_keys(["status"]) and .status == "personal-use-only") or
+    (exact_keys(["status","artifact_version","artifact_url","artifact_sha256","reviewed_at","reviewer","evidence","obligations"]) and
+      .status == "redistribution-reviewed" and
+      (.artifact_version | type == "string" and length > 0) and
+      (.artifact_url | type == "string" and startswith("https://")) and
+      (.artifact_sha256 | digest) and
+      (.reviewed_at | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and
+      (.reviewer | type == "string" and length > 0) and
+      (.evidence | evidence) and
+      (.obligations | type == "array" and length == 4 and all(.[]; obligation)) and
+      ([.obligations[].kind] | sort) == ["corresponding-source","license-text","notices","trademark"]);
+  def locked:
+    .kind == "locked-download" and
+    (.filename | safe_rel) and (.filename | contains("/") | not) and
+    (.url | type == "string" and startswith("https://")) and
+    (.sha256 | digest);
+  def runtime:
+    .kind == "runtime-artifact" and
+    (.manifest_digest_field | type == "string" and test("^[a-z0-9_]+$")) and
+    (.manifest_destination | safe_rel);
+  def entry_source: locked or runtime;
+  def bundle_source:
+    (.kind == "repository-file" or .kind == "repository-tree") and
+    (.path | safe_rel);
+  def world_contract:
+    .schema_version == 1 and
+    (.source.playbook | safe_rel) and (.source.world | safe_rel) and
+    (.world.name | type == "string" and length > 0) and
+    (.world.slug | type == "string" and test("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")) and .world.lifecycle == "draft" and
+    (.world.timezone | type == "string" and length > 0) and
+    (.media.id | type == "string" and test("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")) and
+    (.media.language == "ko-KR" or .media.language == "en-US") and
+    (.media.entries | type == "array" and length > 0 and all(.[]; type == "string" and test("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"))) and
+    ((.media.entries | length) == (.media.entries | unique | length)) and
+    .policies.requireExactHardwareMatch == true and
+    .policies.requireSingleInternalTargetDisk == true and
+    .policies.requireTargetSpecificEraseConfirmation == true and
+    .policies.automaticBootTimeout == "disabled" and
+    (if (.media.entries | index("dns-appliance")) != null
+     then .policies.unattendedInstall == "guarded"
+     else true end);
+
+  .schema_version == 2 and
+  (.distribution_policy |
+    exact_keys(["schema_version","source_release","generated_artifacts","prebuilt_release"]) and
+    .schema_version == 1 and
+    (.source_release | exact_keys(["enabled"]) and (.enabled | type == "boolean")) and
+    (.generated_artifacts | exact_keys(["enabled"]) and (.enabled | type == "boolean")) and
+    (.prebuilt_release | exact_keys(["enabled","required_github_environment"]) and
+      (.enabled | type == "boolean") and .required_github_environment == "prebuilt-distribution")) and
+  (.product.name | type == "string" and length > 0) and
+  (.product.repository | startswith("https://github.com/")) and
+  .catalog.repository == "https://github.com/dalsoop/diy-device-os-bootstrap" and
+  (.catalog.revision | type == "string" and test("^[a-f0-9]{40}$")) and
+  (.catalog.tree | type == "string" and test("^[a-f0-9]{40}$")) and
+  (.catalog.path | safe_rel) and
+  (.catalog.collection | safe_rel) and
+  (.usb.data_label | type == "string" and length > 0 and length <= 15) and
+  (.usb.enrollment_label | type == "string" and length > 0 and length <= 15) and
+  (.usb.enrollment_reserve_mib | type == "number" and . >= 0) and
+  (.usb.capacity_overhead_mib | type == "number" and . >= 128) and
+  (.usb.default_language | type == "string" and length > 0) and
+  .bootloader.implementation == "ventoy" and
+  (.bootloader.id | safe_id) and
+  (.bootloader.version | type == "string" and length > 0) and
+  (.bootloader.archive_root | safe_rel) and
+  (.bootloader.source | locked) and
+  (.bootloader.redistribution | redistribution) and
+  (.groups | type == "array" and length > 0) and
+  (.entries | type == "array" and length > 0) and
+  (.bundles | type == "array") and
+  (all(.groups[]; (.id | safe_id) and (.path | safe_rel) and (.menu_alias | type == "string" and length > 0))) and
+  (all(.entries[];
+    (.id | safe_id) and (.group | safe_id) and
+    (.destination | safe_rel) and (.destination | startswith("images/") and endswith(".iso")) and
+    (.menu_alias | type == "string" and length > 0) and
+    (.description_ko | type == "string" and length > 0) and
+    (.description_en | type == "string" and length > 0) and
+    (.boot_behavior == "guarded-unattended" or .boot_behavior == "interactive-installer" or .boot_behavior == "live-environment") and
+    (.profile_adapter == "none" or .profile_adapter == "dns-appliance") and
+    (.source | entry_source) and
+    (.redistribution | redistribution))) and
+  (all(.bundles[]; (.id | safe_id) and (.destination | safe_rel) and (.source | bundle_source))) and
+  (([.groups[].id] | length) == ([.groups[].id] | unique | length)) and
+  (([.groups[].path] | length) == ([.groups[].path] | unique | length)) and
+  (([.entries[].id] | length) == ([.entries[].id] | unique | length)) and
+  (([.entries[].destination] | length) == ([.entries[].destination] | unique | length)) and
+  (([.bundles[].id] | length) == ([.bundles[].id] | unique | length)) and
+  (([.bundles[].destination] | length) == ([.bundles[].destination] | unique | length)) and
+  ([.groups[].id] as $groups | all(.entries[]; (.group as $group | $groups | index($group)) != null)) and
+  (.groups as $groups |
+    all(.entries[];
+      . as $entry |
+      any($groups[];
+        .id == $entry.group and
+        (.path as $group_path | $entry.destination | startswith($group_path + "/"))))) and
+  (([.bootloader.source.filename] + [.entries[].source | select(.kind == "locked-download") | .filename] | length) ==
+   ([.bootloader.source.filename] + [.entries[].source | select(.kind == "locked-download") | .filename] | unique | length)) and
+  ([.entries[] | select(.profile_adapter == "dns-appliance")] | length <= 1) and
+  (all(.entries[]; if .profile_adapter == "dns-appliance" then .source.kind == "runtime-artifact" else true end)) and
+  (if any(.entries[]; .profile_adapter == "dns-appliance")
+   then .usb.enrollment_reserve_mib > 0
+   else .usb.enrollment_reserve_mib == 0 end) and
+  (if has("world")
+   then (.world | world_contract) and
+        ([.entries[].id] == .world.media.entries) and
+        (.usb.default_language ==
+          (if .world.media.language == "ko-KR" then "ko_KR" else "en_US" end))
+   else true end)
+' "$catalog" >/dev/null || fail "catalog contract is invalid"
+
+echo "usb-media catalog: valid"

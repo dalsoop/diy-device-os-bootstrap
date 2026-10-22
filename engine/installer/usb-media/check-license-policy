@@ -1,0 +1,651 @@
+#!/bin/bash
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -euo pipefail
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+monorepo_root=$(CDPATH='' cd -- "$repo_root/../.." && pwd)
+policy=${DEVICE_OS_DISTRIBUTION_POLICY:-$script_dir/distribution-policy.json}
+# The image builders and writers pass their already-resolved catalog through
+# USB_MEDIA_CATALOG in every mode; only an explicit --catalog is prebuilt-only.
+catalog=${USB_MEDIA_CATALOG:-}
+catalog_flag=0
+mode=
+json_output=0
+release_root=
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+artifacts_file=$temporary/artifacts.jsonl
+blockers_file=$temporary/blockers.jsonl
+warnings_file=$temporary/warnings.jsonl
+: > "$artifacts_file"
+: > "$blockers_file"
+: > "$warnings_file"
+artifact_map=$temporary/artifact-map.tsv
+manifest_map=$temporary/manifest-map.tsv
+review_map=$temporary/review-map.tsv
+: > "$artifact_map"
+: > "$manifest_map"
+: > "$review_map"
+
+usage() {
+    cat >&2 <<'EOF'
+usage:
+  check-license-policy --mode personal-use [--json]
+  check-license-policy --mode source-release [--json]
+  check-license-policy --mode prebuilt-release --catalog ABS \
+    --artifact id=ABS [--artifact id=ABS ...] \
+    --manifest id=ABS --review id=ABS --release-root ABS [--json]
+EOF
+    exit 2
+}
+
+add_finding() {
+    local target=$1 code=$2 message=$3 artifact_id=${4:-}
+    if [ -n "$artifact_id" ]; then
+        jq -nc --arg code "$code" --arg artifact_id "$artifact_id" --arg message "$message" \
+            '{code:$code,artifact_id:$artifact_id,message:$message}' >> "$target"
+    else
+        jq -nc --arg code "$code" --arg message "$message" \
+            '{code:$code,artifact_id:null,message:$message}' >> "$target"
+    fi
+}
+
+block() {
+    add_finding "$blockers_file" "$1" "$2" "${3:-}"
+}
+
+warn() {
+    add_finding "$warnings_file" "$1" "$2" "${3:-}"
+}
+
+add_artifact() {
+    local id=$1 kind=$2 sha256=$3 status=$4
+    case "$status" in
+        personal-use-only|redistribution-reviewed) ;;
+        *)
+            block artifact-unreviewed "$id has an unknown redistribution status" "$id"
+            status=personal-use-only
+            ;;
+    esac
+    if [ -n "$sha256" ] && [[ ! "$sha256" =~ ^[a-f0-9]{64}$ ]]; then
+        block review-digest-mismatch "$id has an invalid SHA-256 value" "$id"
+        sha256=
+    fi
+    if [ -n "$sha256" ]; then
+        jq -nc --arg id "$id" --arg kind "$kind" --arg sha256 "$sha256" --arg status "$status" \
+            '{id:$id,kind:$kind,sha256:$sha256,status:$status}' >> "$artifacts_file"
+    else
+        jq -nc --arg id "$id" --arg kind "$kind" --arg status "$status" \
+            '{id:$id,kind:$kind,sha256:null,status:$status}' >> "$artifacts_file"
+    fi
+}
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk 'NR == 1 {print $1}'
+    else
+        shasum -a 256 "$1" | awk 'NR == 1 {print $1}'
+    fi
+}
+
+absolute_path_has_no_symlink_components() {
+    local path=$1 remainder component prefix=
+    [[ "$path" = /* ]] || return 1
+    remainder=${path#/}
+    while [ -n "$remainder" ]; do
+        component=${remainder%%/*}
+        if [[ "$remainder" = */* ]]; then
+            remainder=${remainder#*/}
+        else
+            remainder=
+        fi
+        [ -n "$component" ] || continue
+        case "$component" in .|..) return 1 ;; esac
+        prefix=$prefix/$component
+        [ ! -L "$prefix" ] || return 1
+    done
+    return 0
+}
+
+assignment() {
+    local collection=$1 value=$2 id path map
+    case "$value" in *=*) ;; *) usage ;; esac
+    id=${value%%=*}
+    path=${value#*=}
+    [[ "$id" =~ ^[a-z0-9][a-z0-9-]*$ ]] || usage
+    [[ "$path" = /* ]] || block artifact-unreviewed "$collection path must be absolute for $id"
+    case "$collection" in
+        artifact) map=$artifact_map ;;
+        manifest) map=$manifest_map ;;
+        review) map=$review_map ;;
+    esac
+    if awk -F '\t' -v id="$id" '$1 == id {found=1} END {exit !found}' "$map"; then
+        block artifact-unreviewed "duplicate $collection ID: $id"
+        return
+    fi
+    printf '%s\t%s\n' "$id" "$path" >> "$map"
+}
+
+assigned_path() {
+    awk -F '\t' -v id="$1" '$1 == id {sub(/^[^\t]*\t/, ""); print; exit}' "$2"
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --mode) [ "$#" -ge 2 ] || usage; mode=$2; shift 2 ;;
+        --catalog) [ "$#" -ge 2 ] || usage; catalog=$2; catalog_flag=1; shift 2 ;;
+        --artifact) [ "$#" -ge 2 ] || usage; assignment artifact "$2"; shift 2 ;;
+        --manifest) [ "$#" -ge 2 ] || usage; assignment manifest "$2"; shift 2 ;;
+        --review) [ "$#" -ge 2 ] || usage; assignment review "$2"; shift 2 ;;
+        --release-root) [ "$#" -ge 2 ] || usage; release_root=$2; shift 2 ;;
+        --json) json_output=1; shift ;;
+        *) usage ;;
+    esac
+done
+
+case "$mode" in personal-use|source-release|prebuilt-release) ;; *) usage ;; esac
+if [ "$mode" != prebuilt-release ] &&
+    { [ "$catalog_flag" -eq 1 ] || [ -s "$artifact_map" ] ||
+      [ -s "$manifest_map" ] || [ -s "$review_map" ] ||
+      [ -n "$release_root" ]; }; then
+    usage
+fi
+if [ "$mode" = prebuilt-release ]; then
+    [ -n "$catalog" ] || usage
+    [ -n "$release_root" ] || usage
+fi
+
+policy_valid=0
+if [ -f "$policy" ] && [ ! -L "$policy" ] && jq -e '
+  (keys | sort) == ["generated_artifacts","prebuilt_release","schema_version","source_release"] and
+  .schema_version == 1 and
+  (.source_release | keys == ["enabled"] and (.enabled | type == "boolean")) and
+  (.generated_artifacts | keys == ["enabled"] and (.enabled | type == "boolean")) and
+  (.prebuilt_release | (keys | sort) == ["enabled","required_github_environment"] and
+    (.enabled | type == "boolean") and .required_github_environment == "prebuilt-distribution")
+' "$policy" >/dev/null 2>&1; then
+    policy_valid=1
+else
+    block policy-disabled "global distribution policy is missing, malformed, or contains unknown fields"
+fi
+
+load_catalog() {
+    if [ -z "$catalog" ]; then
+        catalog=$temporary/catalog.json
+        if ! USB_MEDIA_CATALOG=$catalog "$script_dir/resolve-catalog" >/dev/null 2>&1; then
+            block artifact-unreviewed "selected media could not be resolved"
+            return 1
+        fi
+    fi
+    if [[ "$catalog" != /* ]] || [ ! -f "$catalog" ] || [ -L "$catalog" ]; then
+        block artifact-unreviewed "resolved catalog must be an absolute, regular, non-symlink file"
+        return 1
+    fi
+    if ! "$script_dir/verify-catalog" "$catalog" >/dev/null 2>&1; then
+        block artifact-unreviewed "resolved catalog is malformed or contains unknown policy/status fields"
+        return 1
+    fi
+    if [ "$policy_valid" -eq 1 ] &&
+        ! jq -e --slurpfile policy "$policy" '.distribution_policy == $policy[0]' "$catalog" >/dev/null; then
+        block policy-disabled "resolved catalog does not preserve the exact global distribution policy"
+        return 1
+    fi
+    return 0
+}
+
+enumerate_personal() {
+    local id sha status kind component
+    id=$(jq -r '.bootloader.id' "$catalog")
+    sha=$(jq -r '.bootloader.source.sha256 // empty' "$catalog")
+    status=$(jq -r '.bootloader.redistribution.status' "$catalog")
+    add_artifact "$id" bootloader "$sha" "$status"
+    while IFS=$'\t' read -r id kind sha status; do
+        [ "$sha" = - ] && sha=
+        add_artifact "$id" "$kind" "$sha" "$status"
+        if [ "$kind" = runtime-artifact ]; then
+            while IFS= read -r component; do
+                add_artifact "$component" component "" "$status"
+            done < <(jq -r '.component_ids[]' "$repo_root/build/distribution-policy.json")
+            add_artifact "$id" final-artifact "" "$status"
+        fi
+    done < <(jq -r '.entries[] |
+      [.id,
+       (if .source.kind == "runtime-artifact" then "runtime-artifact" else "catalog-entry" end),
+       (.source.sha256 // "-"),
+       .redistribution.status] | @tsv' "$catalog")
+}
+
+valid_file_path() {
+    local path=$1 description=$2
+    if [[ "$path" != /* ]]; then
+        block artifact-unreviewed "$description must be an absolute, regular file with no symlinked path components"
+        return 1
+    fi
+    if ! absolute_path_has_no_symlink_components "$path"; then
+        block artifact-unreviewed "$description path contains a symlink or non-canonical component"
+        return 1
+    fi
+    if [ ! -f "$path" ]; then
+        block artifact-unreviewed "$description must be an absolute, regular file with no symlinked path components"
+        return 1
+    fi
+    return 0
+}
+
+validate_dns_build_manifest() {
+    jq -e --slurpfile schema "$repo_root/schemas/dns-build-manifest.schema.json" '
+      def exact_keys($expected): (keys | sort) == ($expected | sort);
+      def digest: type == "string" and test("^[a-f0-9]{64}$");
+      def status: . == "personal-use-only" or . == "redistribution-reviewed";
+      def component_status($id):
+        exact_keys(["id","status"]) and .id == $id and (.status | status);
+      ["schema_version","artifact_id","build_id","install_mode","iso","iso_sha256","distribution_status","component_registry","component_registry_sha256","distribution_policy_sha256","components","sbom","sbom_sha256","debian_point_release","debian_snapshot","technitium_version","technitium_image_digest","technitium_archive_sha256","tailscale_version","tailscale_archive_sha256","source_revision","source_repository","source_archive"] as $fields |
+      ($schema[0]["$id"] | endswith("/engine/installer/schemas/dns-build-manifest.schema.json")) and
+      $schema[0].additionalProperties == false and
+      (($schema[0].required | sort) == ($fields | sort)) and
+      (($schema[0].properties | keys | sort) == ($fields | sort)) and
+      exact_keys($fields) and
+      .schema_version == 1 and .artifact_id == "dns-appliance" and
+      (.build_id | type == "string" and length > 0) and
+      (.iso | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._+-]*\\.iso$")) and
+      (.iso_sha256 | digest) and (.distribution_status | status) and
+      .component_registry == "component-redistribution-registry.json" and
+      (.component_registry_sha256 | digest) and (.distribution_policy_sha256 | digest) and
+      (.components | type == "array" and length == 5) and
+      (.components[0] | component_status("debian-package-closure")) and
+      (.components[1] | component_status("technitium-oci")) and
+      (.components[2] | component_status("tailscale-archive")) and
+      (.components[3] | component_status("tailscale-dependency-report")) and
+      (.components[4] | component_status("repository-source-snapshot")) and
+      .sbom == "sbom.spdx.json" and (.sbom_sha256 | digest) and
+      (.debian_point_release | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+      (.debian_snapshot | test("^[0-9]{8}T[0-9]{6}Z$")) and
+      (.technitium_version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+      (.technitium_image_digest | test("^sha256:[a-f0-9]{64}$")) and
+      (.technitium_archive_sha256 | digest) and
+      (.tailscale_version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+      (.tailscale_archive_sha256 | digest) and
+      (.source_revision | type == "string" and test("^[a-f0-9]{40}$")) and
+      .source_repository == "https://github.com/dalsoop/diy-device-os-bootstrap" and
+      .source_archive == (.source_repository + "/archive/" + .source_revision + ".tar.gz")
+    ' "$1" >/dev/null 2>&1
+}
+
+validate_dns_sbom() {
+    jq -e '
+      def exact_keys($expected): (keys | sort) == ($expected | sort);
+      def nonempty: type == "string" and length > 0;
+      def package:
+        (exact_keys(["name","versionInfo","SPDXID","downloadLocation","filesAnalyzed","licenseDeclared","licenseConcluded","copyrightText"]) or
+         exact_keys(["name","versionInfo","SPDXID","downloadLocation","filesAnalyzed","licenseDeclared","licenseConcluded","copyrightText","comment"])) and
+        (.name | nonempty) and (.versionInfo | nonempty) and
+        (.SPDXID | type == "string" and test("^SPDXRef-[A-Za-z0-9.-]+$")) and
+        (.downloadLocation | nonempty) and .filesAnalyzed == false and
+        (.licenseDeclared | nonempty) and (.licenseConcluded | nonempty) and
+        (.copyrightText | nonempty) and ((has("comment") | not) or (.comment | nonempty));
+      ["SPDXRef-DebianPackageClosure","SPDXRef-Technitium","SPDXRef-Tailscale","SPDXRef-TailscaleDependencyReport","SPDXRef-DIYDeviceOSBootstrap"] as $described |
+      exact_keys(["spdxVersion","dataLicense","SPDXID","name","documentNamespace","creationInfo","documentDescribes","packages"]) and
+      .spdxVersion == "SPDX-2.3" and .dataLicense == "CC0-1.0" and .SPDXID == "SPDXRef-DOCUMENT" and
+      (.name | type == "string" and startswith("dns-appliance-installer-") and length > 25) and
+      (.documentNamespace | type == "string" and startswith("https://")) and
+      (.creationInfo | exact_keys(["created","creators"])) and
+      (.creationInfo.created | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+      (.creationInfo.creators | type == "array" and length > 0 and all(.[]; type == "string" and length > 0)) and
+      .documentDescribes == $described and
+      (.packages | type == "array" and length >= 5 and all(.[]; package)) and
+      (([.packages[].SPDXID] | length) == ([.packages[].SPDXID] | unique | length)) and
+      ([.packages[].SPDXID] as $ids | all($described[]; . as $id | $ids | index($id) != null))
+    ' "$1" >/dev/null 2>&1
+}
+
+check_obligations() {
+    local record=$1 artifact=$2 root_real=$3 kind count line disposition path expected candidate candidate_real actual
+    if ! jq -e '.obligations | type == "array"' <<<"$record" >/dev/null 2>&1; then
+        block obligation-unfulfilled "obligations are missing or malformed for $artifact" "$artifact"
+        return
+    fi
+    while IFS= read -r kind; do
+        [ -n "$kind" ] || {
+            block obligation-unfulfilled "obligation kind is malformed for $artifact" "$artifact"
+            continue
+        }
+        case "$kind" in license-text|notices|corresponding-source|trademark) ;; *)
+            block obligation-unfulfilled "obligation kind is mismatched for $artifact: $kind" "$artifact"
+            ;;
+        esac
+    done < <(jq -r '.obligations[] | if type == "object" and (.kind | type == "string") then .kind else "" end' <<<"$record")
+    for kind in license-text notices corresponding-source trademark; do
+        count=$(jq -r --arg kind "$kind" '[.obligations[] | select(type == "object" and .kind == $kind)] | length' <<<"$record")
+        if [ "$count" -eq 0 ]; then
+            block obligation-unfulfilled "required obligation is missing for $artifact: $kind" "$artifact"
+            continue
+        fi
+        if [ "$count" -ne 1 ]; then
+            block obligation-unfulfilled "required obligation is duplicated for $artifact: $kind" "$artifact"
+            continue
+        fi
+        line=$(jq -c --arg kind "$kind" '.obligations[] | select(type == "object" and .kind == $kind)' <<<"$record")
+        if ! jq -e --arg kind "$kind" '
+          def exact_keys($expected): (keys | sort) == ($expected | sort);
+          def digest: type == "string" and test("^[a-f0-9]{64}$");
+          def safe_path: type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._+/-]*$") and
+            (startswith("/") | not) and (split("/") | all(. != "" and . != "." and . != ".."));
+          def location($scope): exact_keys(["scope","path","sha256"]) and .scope == $scope and
+            (.path | safe_path) and (.sha256 | digest);
+          type == "object" and .kind == $kind and
+          if .disposition == "embedded-artifact" then
+            exact_keys(["kind","disposition","location"]) and (.location | location("artifact"))
+          elif .disposition == "bundle-file" then
+            exact_keys(["kind","disposition","location"]) and (.location | location("release-bundle"))
+          elif .disposition == "not-required" then exact_keys(["kind","disposition"])
+          else false end
+        ' <<<"$line" >/dev/null 2>&1; then
+            block obligation-unfulfilled "obligation is malformed or mismatched for $artifact: $kind" "$artifact"
+            continue
+        fi
+        disposition=$(jq -r '.disposition' <<<"$line")
+        case "$disposition" in
+            not-required) ;;
+            embedded-artifact)
+                block unsupported-artifact-inspection "embedded obligation inspection is unsupported for $artifact" "$artifact"
+                ;;
+            bundle-file)
+                path=$(jq -r '.location.path' <<<"$line")
+                expected=$(jq -r '.location.sha256' <<<"$line")
+                candidate=$release_root/$path
+                if [ -z "$root_real" ]; then
+                    block obligation-unfulfilled "release-bundle obligation is missing for $artifact: $path" "$artifact"
+                    continue
+                fi
+                if ! absolute_path_has_no_symlink_components "$candidate"; then
+                    block obligation-unfulfilled "release-bundle obligation path contains a symlink or non-canonical component for $artifact: $path" "$artifact"
+                    continue
+                fi
+                if [ ! -f "$candidate" ]; then
+                    block obligation-unfulfilled "release-bundle obligation is missing for $artifact: $path" "$artifact"
+                    continue
+                fi
+                candidate_real=$(realpath "$candidate" 2>/dev/null || true)
+                case "$candidate_real" in "$root_real"/*) ;; *)
+                    block obligation-unfulfilled "release-bundle obligation escapes release root for $artifact: $path" "$artifact"
+                    continue
+                    ;;
+                esac
+                actual=$(sha256_file "$candidate")
+                [ "$actual" = "$expected" ] ||
+                    block obligation-unfulfilled "release-bundle obligation digest differs for $artifact: $path" "$artifact"
+                ;;
+            *) block obligation-unfulfilled "unknown obligation disposition for $artifact" "$artifact" ;;
+        esac
+    done
+}
+
+check_prebuilt_entry() {
+    local entry=$1 kind id status path actual expected version url redistribution root_real=$2
+    id=$(jq -r '.id' <<<"$entry")
+    kind=$(jq -r 'if .source.kind == "runtime-artifact" then "runtime-artifact" else "catalog-entry" end' <<<"$entry")
+    status=$(jq -r '.redistribution.status' <<<"$entry")
+    path=$(assigned_path "$id" "$artifact_map")
+    actual=
+    if [ -z "$path" ] || ! valid_file_path "$path" "artifact $id"; then
+        block artifact-unreviewed "selected artifact is missing: $id" "$id"
+    else
+        actual=$(sha256_file "$path")
+    fi
+    add_artifact "$id" "$kind" "$actual" "$status"
+    if [ "$status" != redistribution-reviewed ]; then
+        block artifact-unreviewed "$id is not redistribution-reviewed" "$id"
+    fi
+    if [ "$kind" = catalog-entry ]; then
+        expected=$(jq -r '.source.sha256' <<<"$entry")
+        [ -z "$actual" ] || [ "$actual" = "$expected" ] ||
+            block review-digest-mismatch "$id bytes do not match the locked source digest" "$id"
+        if [ "$status" = redistribution-reviewed ]; then
+            version=$(jq -r '.version' <<<"$entry")
+            url=$(jq -r '.source.url' <<<"$entry")
+            redistribution=$(jq -c '.redistribution' <<<"$entry")
+            if ! jq -e --arg version "$version" --arg url "$url" --arg digest "$actual" '
+                .artifact_version == $version and .artifact_url == $url and .artifact_sha256 == $digest
+            ' <<<"$redistribution" >/dev/null; then
+                block review-digest-mismatch "$id review does not bind the exact selected artifact" "$id"
+            fi
+            check_obligations "$redistribution" "$id" "$root_real"
+        fi
+    else
+        add_artifact "$id" final-artifact "$actual" "$status"
+        check_dns_runtime "$entry" "$path" "$actual" "$root_real"
+    fi
+}
+
+check_dns_runtime() {
+    local entry=$1 artifact=$2 actual=$3 root_real=$4 id manifest review dir registry sbom expected manifest_sha registry_sha review_record
+    local component component_digest component_status sbom_sha
+    local manifest_ok=0 registry_ok=0 sbom_ok=0 review_ok=0
+    id=$(jq -r '.id' <<<"$entry")
+    manifest=$(assigned_path "$id" "$manifest_map")
+    review=$(assigned_path "$id" "$review_map")
+    if [ -z "$manifest" ] || ! valid_file_path "$manifest" "manifest $id"; then
+        block artifact-unreviewed "runtime build manifest is missing: $id" "$id"
+    elif ! validate_dns_build_manifest "$manifest"; then
+        block artifact-unreviewed "runtime build manifest violates the exact DNS contract: $id" "$id"
+    else
+        manifest_ok=1
+        expected=$(jq -r '.iso_sha256 // empty' "$manifest" 2>/dev/null || true)
+        { [ -n "$actual" ] && [ "$actual" = "$expected" ]; } ||
+            block review-digest-mismatch "$id bytes do not match the runtime build manifest" "$id"
+    fi
+    if [ -n "$manifest" ]; then
+        dir=$(dirname -- "$manifest")
+    elif [ -n "$artifact" ]; then
+        dir=$(dirname -- "$artifact")
+    elif [ -n "$review" ]; then
+        dir=$(dirname -- "$review")
+    else
+        dir=$release_root
+    fi
+    registry=$dir/$(jq -r '.source.component_registry_filename' <<<"$entry")
+    sbom=$dir/$(jq -r '.source.sbom_filename' <<<"$entry")
+    if ! valid_file_path "$registry" "component registry $id"; then
+        block artifact-unreviewed "component registry is missing: $id" "$id"
+    elif ! "$repo_root/build/verify-distribution-contracts" --registry "$registry" \
+        --policy "$repo_root/build/distribution-policy.json" >/dev/null 2>&1; then
+        block artifact-unreviewed "component registry violates the exact DNS contract: $id" "$id"
+    else
+        registry_ok=1
+    fi
+    if [ -f "$registry" ] && [ ! -L "$registry" ]; then
+        registry_sha=$(sha256_file "$registry")
+        if [ "$manifest_ok" -eq 1 ]; then
+            [ "$registry_sha" = "$(jq -r '.component_registry_sha256 // empty' "$manifest")" ] ||
+                block review-digest-mismatch "$id component registry digest differs from the build manifest" "$id"
+        fi
+    fi
+    while IFS= read -r component; do
+        component_digest=
+        component_status=personal-use-only
+        if [ "$registry_ok" -eq 1 ]; then
+            component_digest=$(jq -r --arg id "$component" \
+                '.components[] | select(.id == $id) | .digest.value // empty' "$registry" | sed -n '1p')
+            component_status=$(jq -r --arg id "$component" \
+                '.components[] | select(.id == $id) | .redistribution.status // empty' "$registry" | sed -n '1p')
+            if [ -z "$component_status" ]; then
+                component_status=personal-use-only
+                block component-unreviewed "$component is missing from the component registry" "$component"
+            fi
+        fi
+        add_artifact "$component" component "$component_digest" "$component_status"
+        [ "$component_status" = redistribution-reviewed ] ||
+            block component-unreviewed "$component is not redistribution-reviewed" "$component"
+    done < <(jq -r '.component_ids[]' "$repo_root/build/distribution-policy.json")
+    if ! valid_file_path "$sbom" "SPDX SBOM $id"; then
+        block artifact-unreviewed "SPDX SBOM is missing: $id" "$id"
+    elif ! jq -e 'type == "object"' "$sbom" >/dev/null 2>&1; then
+        block artifact-unreviewed "SPDX SBOM violates the exact DNS contract: $id" "$id"
+    else
+        if validate_dns_sbom "$sbom"; then
+            sbom_ok=1
+        else
+            block artifact-unreviewed "SPDX SBOM violates the exact DNS contract: $id" "$id"
+        fi
+        if jq -e '[.. | strings | ascii_upcase | select(contains("NOASSERTION"))] | length > 0' "$sbom" >/dev/null; then
+            block noassertion-present "$id SPDX SBOM contains NOASSERTION" "$id"
+        fi
+    fi
+    if [ -f "$sbom" ] && [ ! -L "$sbom" ]; then
+        sbom_sha=$(sha256_file "$sbom")
+        if [ "$manifest_ok" -eq 1 ]; then
+            [ "$sbom_sha" = "$(jq -r '.sbom_sha256 // empty' "$manifest")" ] ||
+                block review-digest-mismatch "$id SPDX SBOM digest differs from the build manifest" "$id"
+        fi
+    fi
+    if [ -z "$review" ] || ! valid_file_path "$review" "final review $id"; then
+        block artifact-unreviewed "exact final review is missing: $id" "$id"
+        review_record='{}'
+    elif ! jq -e 'type == "object"' "$review" >/dev/null 2>&1; then
+        block artifact-unreviewed "final review is malformed: $id" "$id"
+        review_record='{}'
+    else
+        review_ok=1
+        review_record=$(jq -c '.' "$review")
+    fi
+    if [ "$review_ok" -eq 1 ]; then
+        if ! jq -e --arg artifact "$actual" '.artifact.sha256 == $artifact' \
+            <<<"$review_record" >/dev/null 2>&1; then
+            block review-digest-mismatch "$id final review does not bind the exact artifact" "$id"
+        fi
+        if [ -n "${registry_sha:-}" ] &&
+            ! jq -e --arg registry "$registry_sha" '.inputs.component_registry_sha256 == $registry' \
+                <<<"$review_record" >/dev/null 2>&1; then
+            block review-digest-mismatch "$id final review does not bind the exact component registry" "$id"
+        fi
+        if [ "$manifest_ok" -eq 1 ]; then
+            manifest_sha=$(sha256_file "$manifest")
+            if ! jq -e --arg manifest "$manifest_sha" '.inputs.build_manifest_sha256 == $manifest' \
+                <<<"$review_record" >/dev/null 2>&1; then
+                block review-digest-mismatch "$id final review does not bind the exact build manifest" "$id"
+            fi
+        fi
+        check_obligations "$review_record" "$id" "$root_real"
+    fi
+    if [ "$manifest_ok" -eq 1 ] && [ "$registry_ok" -eq 1 ] &&
+        [ "$sbom_ok" -eq 1 ] && [ "$review_ok" -eq 1 ] &&
+        ! "$repo_root/build/verify-distribution-contracts" \
+            --registry "$registry" --final-review "$review" \
+            --build-manifest "$manifest" --sbom "$sbom" >/dev/null 2>&1; then
+        block artifact-unreviewed "$id failed the DNS redistribution verifier" "$id"
+    fi
+}
+
+case "$mode" in
+    personal-use)
+        if load_catalog; then
+            enumerate_personal
+        fi
+        ;;
+    source-release)
+        if [ "$policy_valid" -eq 1 ] && ! jq -e '.source_release.enabled == true' "$policy" >/dev/null; then
+            block policy-disabled "source releases are disabled by global policy"
+        fi
+        revision=$(git -C "$monorepo_root" rev-parse --verify HEAD 2>/dev/null || true)
+        source_sha=
+        if [[ ! "$revision" =~ ^[a-f0-9]{40}$ ]]; then
+            block artifact-unreviewed "Git source revision is unavailable"
+        elif command -v sha256sum >/dev/null 2>&1; then
+            source_sha=$(git -C "$monorepo_root" archive --format=tar "$revision" | sha256sum | awk 'NR == 1 {print $1}')
+        else
+            source_sha=$(git -C "$monorepo_root" archive --format=tar "$revision" | shasum -a 256 | awk 'NR == 1 {print $1}')
+        fi
+        tracked_status=$temporary/git-status
+        if ! git -C "$monorepo_root" status --porcelain --untracked-files=no > "$tracked_status" 2>/dev/null; then
+            block artifact-unreviewed "Git tracked-status inspection failed"
+        elif [ -s "$tracked_status" ]; then
+            block artifact-unreviewed "source release requires a clean tracked Git snapshot"
+        fi
+        add_artifact repository-source-snapshot final-artifact "$source_sha" redistribution-reviewed
+        ;;
+    prebuilt-release)
+        if [ "$policy_valid" -eq 1 ] &&
+            ! jq -e '.generated_artifacts.enabled == true and .prebuilt_release.enabled == true' "$policy" >/dev/null; then
+            block policy-disabled "prebuilt releases require generated-artifact and prebuilt-release policy to both be enabled"
+        fi
+        root_real=
+        if [[ "$release_root" != /* ]]; then
+            block obligation-unfulfilled "release root must be an absolute, existing directory with no symlinked path components"
+        elif ! absolute_path_has_no_symlink_components "$release_root"; then
+            block obligation-unfulfilled "release root path contains a symlink or non-canonical component"
+        elif [ ! -d "$release_root" ]; then
+            block obligation-unfulfilled "release root must be an absolute, existing directory with no symlinked path components"
+        else
+            root_real=$(realpath "$release_root")
+        fi
+        if load_catalog; then
+            known_ids=$(jq -r '[.bootloader.id,.entries[].id] | join(" ")' "$catalog")
+            while IFS= read -r supplied_id; do
+                [ -n "$supplied_id" ] || continue
+                case " $known_ids " in *" $supplied_id "*) ;; *)
+                    block artifact-unreviewed "unknown supplied artifact ID: $supplied_id"
+                    ;;
+                esac
+            done < <(awk -F '\t' '{print $1}' "$artifact_map" "$manifest_map" "$review_map" | sort -u)
+            bootloader=$(jq -c '.bootloader' "$catalog")
+            boot_id=$(jq -r '.id' <<<"$bootloader")
+            boot_status=$(jq -r '.redistribution.status' <<<"$bootloader")
+            boot_path=$(assigned_path "$boot_id" "$artifact_map")
+            boot_actual=
+            if [ -z "$boot_path" ] || ! valid_file_path "$boot_path" "artifact $boot_id"; then
+                block artifact-unreviewed "selected artifact is missing: $boot_id" "$boot_id"
+            else
+                boot_actual=$(sha256_file "$boot_path")
+            fi
+            add_artifact "$boot_id" bootloader "$boot_actual" "$boot_status"
+            [ "$boot_status" = redistribution-reviewed ] || block artifact-unreviewed "$boot_id is not redistribution-reviewed" "$boot_id"
+            [ -z "$boot_actual" ] || [ "$boot_actual" = "$(jq -r '.source.sha256' <<<"$bootloader")" ] ||
+                block review-digest-mismatch "$boot_id bytes do not match the locked source digest" "$boot_id"
+            if [ "$boot_status" = redistribution-reviewed ]; then
+                redistribution=$(jq -c '.redistribution' <<<"$bootloader")
+                if ! jq -e --arg version "$(jq -r '.version' <<<"$bootloader")" \
+                    --arg url "$(jq -r '.source.url' <<<"$bootloader")" --arg digest "$boot_actual" '
+                    .artifact_version == $version and .artifact_url == $url and .artifact_sha256 == $digest
+                ' <<<"$redistribution" >/dev/null; then
+                    block review-digest-mismatch "$boot_id review does not bind the exact selected artifact" "$boot_id"
+                fi
+                check_obligations "$redistribution" "$boot_id" "$root_real"
+            fi
+            while IFS= read -r entry; do
+                check_prebuilt_entry "$entry" "$root_real"
+            done < <(jq -c '.entries[]' "$catalog")
+        else
+            block artifact-unreviewed "prebuilt inputs cannot be selected without a valid catalog"
+        fi
+        ;;
+esac
+
+while IFS=$'\t' read -r warning_id warning_kind; do
+    warn artifact-unreviewed \
+        "$warning_id ($warning_kind) is not reviewed for public redistribution" "$warning_id"
+done < <(jq -r 'select(.status == "personal-use-only") | [.id,.kind] | @tsv' "$artifacts_file")
+
+artifacts=$(jq -s '.' "$artifacts_file")
+blockers=$(jq -s 'unique_by(.code + "\u0000" + (.artifact_id // "") + "\u0000" + .message)' "$blockers_file")
+warnings=$(jq -s 'unique_by(.code + "\u0000" + (.artifact_id // "") + "\u0000" + .message)' "$warnings_file")
+if [ "$(jq 'length' <<<"$blockers")" -eq 0 ]; then
+    decision=allow
+    exit_status=0
+else
+    decision=deny
+    exit_status=1
+fi
+result=$(jq -n --arg mode "$mode" --arg decision "$decision" \
+    --argjson artifacts "$artifacts" --argjson blockers "$blockers" --argjson warnings "$warnings" '
+    {schema_version:1,mode:$mode,decision:$decision,
+     selected_artifacts:$artifacts,blockers:$blockers,warnings:$warnings}')
+if [ "$json_output" -eq 1 ]; then
+    printf '%s\n' "$result"
+else
+    printf 'license policy: %s (%s)\n' "$decision" "$mode"
+    jq -r '.blockers[] | "blocker: \(.code): \(.message)"' <<<"$result"
+    jq -r '.warnings[] | "warning: \(.code): \(.message)"' <<<"$result"
+fi
+exit "$exit_status"

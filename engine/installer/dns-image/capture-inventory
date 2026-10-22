@@ -1,0 +1,95 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+sys_root=${DNS_INVENTORY_SYS_ROOT:-/sys}
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+device_root=${DNS_INVENTORY_DEVICE_ROOT:-/dev}
+
+usage() {
+    echo "usage: $0 <dns01|dns02|dns03> <address> <interface> <disk>" >&2
+    exit 2
+}
+
+[ "$#" -eq 4 ] || usage
+
+role=$1
+address=$2
+interface=$3
+disk=${4#/dev/}
+
+case "$role" in
+    dns01|dns02|dns03) ;;
+    *) usage ;;
+esac
+
+[ -d "$sys_root/class/net/$interface" ] || {
+    echo "interface not found: $interface" >&2
+    exit 1
+}
+[ -d "$sys_root/class/block/$disk" ] || {
+    echo "disk not found: /dev/$disk" >&2
+    exit 1
+}
+[ ! -e "$sys_root/class/block/$disk/partition" ] || {
+    echo "a whole disk is required, not a partition: /dev/$disk" >&2
+    exit 1
+}
+
+normalize() {
+    LC_ALL=C tr '[:lower:]' '[:upper:]' |
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+hash_value() {
+    value=$1
+    [ -n "$value" ] || {
+        echo "required hardware value is empty" >&2
+        exit 1
+    }
+    printf '%s' "$value" | normalize | sha256sum | awk '{print $1}'
+}
+
+read_value() {
+    file=$1
+    [ -r "$file" ] || {
+        echo "cannot read hardware identity: $file" >&2
+        exit 1
+    }
+    sed -n '1p' "$file"
+}
+
+product_name=$(read_value "$sys_root"/class/dmi/id/product_name)
+product_sku=$(read_value "$sys_root"/class/dmi/id/product_sku)
+system_serial=$(read_value "$sys_root"/class/dmi/id/product_serial)
+system_uuid=$(read_value "$sys_root"/class/dmi/id/product_uuid)
+mac=$(read_value "$sys_root/class/net/$interface/address")
+disk_model=$(DNS_DISK_SYS_ROOT="$sys_root" DNS_DISK_DEVICE_ROOT="$device_root" \
+    /bin/sh "$script_dir/disk-identity" "$disk" model)
+disk_serial=$(DNS_DISK_SYS_ROOT="$sys_root" DNS_DISK_DEVICE_ROOT="$device_root" \
+    /bin/sh "$script_dir/disk-identity" "$disk" serial)
+disk_sectors=$(read_value "$sys_root/class/block/$disk/size")
+disk_bytes=$((disk_sectors * 512))
+
+cat <<EOF
+role=$role
+address=$address
+prefix_length=16
+netmask=255.255.0.0
+gateway=10.0.0.1
+dns_servers=10.0.0.1
+domain=home.arpa
+lan_cidr=10.0.0.0/16
+management_cidr=10.0.0.0/24
+cluster_domain=dns-cluster.home.arpa
+expected_product_name_sha256=$(hash_value "$product_name")
+expected_product_sku_sha256=$(hash_value "$product_sku")
+expected_system_serial_sha256=$(hash_value "$system_serial")
+expected_system_uuid_sha256=$(hash_value "$system_uuid")
+expected_mac_sha256=$(hash_value "$mac")
+expected_disk_model_sha256=$(hash_value "$disk_model")
+expected_disk_serial_sha256=$(hash_value "$disk_serial")
+expected_disk_min_bytes=$disk_bytes
+destructive_install_enabled=false
+EOF

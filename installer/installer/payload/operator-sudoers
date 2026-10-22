@@ -1,3 +1,0 @@
-# SSH remains key-only. This rule guarantees recovery access if enrollment
-# writeback fails before the generated Cockpit/PAM password can be retrieved.
-operator ALL=(ALL:ALL) NOPASSWD: ALL

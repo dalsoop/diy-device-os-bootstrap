@@ -4,6 +4,13 @@ Contributions are welcome through pull requests. Keep changes within the module
 boundaries and safety rules in `AGENTS.md`, and update every affected producer,
 consumer, fixture, and document together.
 
+User-owned data lives in `burn-history/`: what you edit (`home.yaml`,
+`dns-records.zone`, `os-installs/<role>/os.conf`), private files never committed
+(`keys/`, `os-installs/<role>/hardware.conf`, `.in-progress/`), and what happened
+(never edited) in `logs/`.
+Code, schemas, and tests live in `engine/`. Never hand-edit
+`burn-history/logs/`.
+
 ## Contribution license
 
 Except where an upstream or file-specific notice says otherwise, every
@@ -34,8 +41,12 @@ separate permission required from another copyright holder.
 - Land substantive changes through a pull request; do not push directly to
   `main`.
 - Keep documentation and examples in English.
+- Follow the documentation rule in `docs/standards.md`: name roles such as the
+  build host, the VM host, the operator workstation, and the management host,
+  never specific machines or personal paths, and describe only the present
+  layout and behavior. The required `contracts` check enforces it.
 - Report source, image assembly, physical USB write, firmware boot,
   installation, and network cutover as separate evidence states.
 - Do not describe a source tag or CI result as physical qualification.
 
-See `LICENSE_HISTORY.md` for the MIT-to-GPL transition boundary.
+See `docs/licenses/LICENSE_HISTORY.md` for the MIT-to-GPL transition boundary.

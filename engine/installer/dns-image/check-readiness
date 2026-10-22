@@ -1,0 +1,126 @@
+#!/bin/bash
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -euo pipefail
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+monorepo_root=$(CDPATH='' cd -- "$repo_root/../.." && pwd)
+inventory_dir=${DNS_APPLIANCE_INVENTORY_DIR:-$monorepo_root/burn-history/os-installs}
+inventory_file=hardware.conf
+install_mode=${DNS_APPLIANCE_INSTALL_MODE:-reviewed}
+case "$install_mode" in
+    reviewed) ;;
+    guided) inventory_file=os.conf ;;
+    *) echo 'check-readiness: unknown install mode' >&2; exit 2 ;;
+esac
+authorized_keys=${DNS_APPLIANCE_AUTHORIZED_KEYS:-$monorepo_root/burn-history/keys/operator-authorized-keys}
+age_recipient=${DNS_APPLIANCE_AGE_RECIPIENT:-$monorepo_root/burn-history/keys/age-recipient}
+cache_dir=${DNS_APPLIANCE_CACHE_DIR:-$repo_root/cache}
+artifact_dir=${DNS_APPLIANCE_ARTIFACT_DIR:-$repo_root/artifacts}
+# shellcheck disable=SC1091
+. "$repo_root/build/locks/sources.env"
+
+declare -a blockers=()
+declare -a ready=()
+
+pass() { ready+=("$1"); }
+block() { blockers+=("$1"); }
+
+enabled_count=0
+inventory_complete=1
+for role in dns01 dns02 dns03; do
+    file=$inventory_dir/$role/$inventory_file
+    if [ ! -r "$file" ]; then
+        inventory_complete=0
+        block "missing captured inventory for $role"
+        continue
+    fi
+    if ! grep -q "^role=$role$" "$file"; then
+        inventory_complete=0
+        block "captured inventory has the wrong role for $role"
+    fi
+    if ! /bin/sh "$script_dir/scripts/install-gate" validate-profile "$file" "$role" 2>/dev/null; then
+        inventory_complete=0
+        block "$role has an invalid network profile"
+    fi
+    enabled=$(awk -F= '$1 == "destructive_install_enabled" { print $2 }' "$file")
+    case "$enabled" in
+        true) enabled_count=$((enabled_count + 1)) ;;
+        false) ;;
+        *) inventory_complete=0; block "$role has an invalid destructive-install flag" ;;
+    esac
+done
+[ "$inventory_complete" -eq 1 ] && pass "three role profiles are present"
+if [ "$install_mode" = guided ]; then
+    if [ "$enabled_count" -eq 0 ]; then
+        pass "guided mode requires fresh on-target inventory and erase confirmation"
+    else
+        block "guided network profiles must not enable destructive installation"
+    fi
+elif [ "$enabled_count" -eq 1 ]; then
+    pass "exactly one DNS role is erase-enabled"
+else
+    block "exactly one DNS role must be erase-enabled; found $enabled_count"
+fi
+
+if [ -r "$authorized_keys" ] && awk '
+  /^[[:space:]]*(#|$)/ { next }
+  $1 ~ /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-)/ { found=1; next }
+  { bad=1 }
+  END { exit !(found && !bad) }
+' "$authorized_keys"; then
+    pass "operator SSH public key is ready"
+else
+    block "operator SSH public-key input is missing or invalid"
+fi
+
+if [ -r "$age_recipient" ] &&
+    awk '!/^[[:space:]]*(#|$)/ { print; exit }' "$age_recipient" |
+        grep -Eq '^age1[0-9a-z]{58}$'; then
+    pass "age recovery recipient is ready"
+else
+    block "age recovery recipient is missing or invalid"
+fi
+
+for required in \
+    "$cache_dir/technitium-dns-$TECHNITIUM_VERSION-amd64.oci.tar" \
+    "$cache_dir/tailscale-$TAILSCALE_VERSION-amd64.tgz" \
+    "$cache_dir/tailscale-$TAILSCALE_VERSION-dependency-licenses.md"; do
+    if [ -s "$required" ]; then
+        pass "cached $(basename -- "$required")"
+    else
+        block "missing locked DNS build input $(basename -- "$required")"
+    fi
+done
+
+manifest=$artifact_dir/build-manifest.json
+if [ -r "$manifest" ]; then
+    manifest_mode=$(jq -r '.install_mode // "reviewed"' "$manifest")
+    [ "$manifest_mode" = "$install_mode" ] || block "DNS installer manifest has the wrong install mode"
+    iso_name=$(jq -er '.iso' "$manifest" 2>/dev/null || true)
+    iso=$script_dir/simple-cdd/images/$iso_name
+    expected=$(jq -er '.iso_sha256' "$manifest" 2>/dev/null || true)
+    if [ -n "$iso_name" ] && [ -r "$iso" ] && [ -n "$expected" ]; then
+        actual=$(sha256sum "$iso" 2>/dev/null | awk '{print $1}' ||
+            shasum -a 256 "$iso" | awk '{print $1}')
+        if [ "$actual" = "$expected" ]; then
+            pass "DNS installer ISO matches its build manifest"
+        else
+            block "DNS installer ISO does not match its build manifest"
+        fi
+    else
+        block "DNS build manifest does not resolve to a readable ISO"
+    fi
+else
+    block "DNS installer ISO and build manifest have not been built"
+fi
+
+ready_json=$(printf '%s\n' "${ready[@]:-}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+blockers_json=$(printf '%s\n' "${blockers[@]:-}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+jq -n \
+    --argjson ready "$ready_json" \
+    --argjson blockers "$blockers_json" \
+    '{schema_version:1,ready:($blockers|length == 0),passed:$ready,blockers:$blockers}'
+
+[ "${#blockers[@]}" -eq 0 ]

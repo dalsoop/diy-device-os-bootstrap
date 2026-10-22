@@ -1,0 +1,46 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Verify that every non-ASCII character of the installer-screen text is in
+# the debian-installer font (/usr/lib/unifont.bgf in install.amd/initrd.gz).
+# A missing glyph fails with the file, line, code point and character.
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+
+fail() {
+    echo "check-installer-glyphs: $*" >&2
+    exit 1
+}
+
+usage="usage: check-installer-glyphs --iso ISO | --initrd INITRD.gz [TEXT...]"
+[ "$#" -ge 2 ] || fail "$usage"
+mode=$1
+source_path=$2
+shift 2
+case "$mode" in
+    --iso | --initrd) ;;
+    *) fail "$usage" ;;
+esac
+[ "$#" -gt 0 ] || set -- "$script_dir/scripts/guided.templates"
+for input in "$source_path" "$@"; do
+    if [ ! -f "$input" ] || [ ! -r "$input" ]; then
+        fail "cannot read $input"
+    fi
+done
+command -v python3 >/dev/null 2>&1 || fail "python3 is required"
+
+initrd=$source_path
+if [ "$mode" = --iso ]; then
+    command -v xorriso >/dev/null 2>&1 || fail "xorriso is required"
+    temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/dns-installer-glyphs.XXXXXX")
+    trap 'rm -rf "$temporary_dir"' EXIT HUP INT TERM
+    initrd=$temporary_dir/initrd.gz
+    if ! xorriso -osirrox on -indev "$source_path" \
+        -extract /install.amd/initrd.gz "$initrd" >/dev/null 2>&1 || [ ! -f "$initrd" ]; then
+        fail "ISO has no /install.amd/initrd.gz: $source_path"
+    fi
+fi
+
+python3 -I "$script_dir/lib/installer_glyphs.py" --initrd "$initrd" -- "$@"

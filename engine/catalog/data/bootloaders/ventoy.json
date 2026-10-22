@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "id": "ventoy",
+  "implementation": "ventoy",
+  "version": "1.1.18",
+  "archive_root": "ventoy-1.1.18",
+  "source": {
+    "kind": "locked-download",
+    "filename": "ventoy-1.1.18-linux.tar.gz",
+    "url": "https://github.com/ventoy/Ventoy/releases/download/v1.1.18/ventoy-1.1.18-linux.tar.gz",
+    "sha256": "d86ff9de63d94c8b8f1f6b14d23c55af4b88e8207bf2893890892a6a97b1ad54"
+  },
+  "redistribution": {
+    "status": "personal-use-only"
+  }
+}
+

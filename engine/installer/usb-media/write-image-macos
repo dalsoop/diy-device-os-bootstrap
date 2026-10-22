@@ -1,0 +1,253 @@
+#!/bin/bash
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -euo pipefail
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+license_checker=${DEVICE_OS_LICENSE_CHECKER:-$script_dir/check-license-policy}
+distribution_policy=$script_dir/distribution-policy.json
+image=
+device=
+confirmation=
+write_evidence=${DEVICE_OS_WRITE_EVIDENCE:-}
+
+usage() {
+    cat >&2 <<'EOF'
+usage: sudo usb-media/write-image-macos \
+  --image /absolute/path/device-os.raw \
+  --device /dev/diskN \
+  --confirm 'ERASE /dev/diskN MEDIA_NAME USB_SERIAL EXACT_BYTES'
+
+The raw MBR image must have exactly the same byte size as the removable target.
+The command keeps the partition map hidden while it writes and verifies the
+image body, commits and verifies the first MiB last, then unmounts and ejects.
+EOF
+    exit 2
+}
+
+fail() {
+    echo "write-image-macos: $*" >&2
+    exit 1
+}
+
+emit_write_evidence() {
+    local readback_status=$1
+    local completed_at=${2:-}
+    local evidence_temporary
+    [ -n "$write_evidence" ] || return 0
+    [[ "$write_evidence" = /* ]] || fail "DEVICE_OS_WRITE_EVIDENCE must be an absolute path"
+    [ -d "$(dirname -- "$write_evidence")" ] || fail "write-evidence directory is missing"
+    evidence_temporary=$write_evidence.tmp.$$
+    jq -n \
+        --arg writer macos-mbr-last \
+        --arg device_path "$device" \
+        --arg display_name "$media_name" \
+        --argjson bytes "$device_bytes" \
+        --arg preflight_at "$preflight_at" \
+        --arg completed_at "$completed_at" \
+        --arg readback_status "$readback_status" \
+        '{
+          schema_version: 1,
+          writer: $writer,
+          device_path: $device_path,
+          target: {display_name: $display_name, bytes: $bytes},
+          preflight_at: $preflight_at,
+          completed_at: (if $completed_at == "" then null else $completed_at end),
+          readback: {method: "mbr-last-raw-compare", status: $readback_status}
+        }' > "$evidence_temporary"
+    chmod 0600 "$evidence_temporary"
+    mv "$evidence_temporary" "$write_evidence"
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --image) image=${2:-}; shift 2 ;;
+        --device) device=${2:-}; shift 2 ;;
+        --confirm) confirmation=${2:-}; shift 2 ;;
+        *) usage ;;
+    esac
+done
+
+[ "$(uname -s)" = Darwin ] || fail "macOS is required"
+[ "$(id -u)" -eq 0 ] || fail "run with sudo"
+command -v jq >/dev/null 2>&1 || fail "jq is required"
+command -v shasum >/dev/null 2>&1 || fail "shasum is required"
+command -v ioreg >/dev/null 2>&1 || fail "ioreg is required"
+[[ "$image" = /* ]] || fail "--image must be an absolute path"
+[ -f "$image" ] || fail "raw image not found: $image"
+[[ "$device" =~ ^/dev/disk[0-9]+$ ]] || fail "whole-disk /dev/diskN target required"
+catalog=${USB_MEDIA_CATALOG:-}
+[[ "$catalog" = /* ]] || fail "USB_MEDIA_CATALOG must be an absolute path"
+[ -r "$catalog" ] || fail "resolved catalog is missing: $catalog"
+[ -x "$license_checker" ] || fail "license policy checker is unavailable"
+license_decision=$(mktemp /tmp/device-os-license.XXXXXX)
+trap 'rm -f "$license_decision"' EXIT HUP INT TERM
+if ! DEVICE_OS_DISTRIBUTION_POLICY=$distribution_policy USB_MEDIA_CATALOG=$catalog \
+    "$license_checker" --mode personal-use --json > "$license_decision"; then
+    rm -f "$license_decision"
+    fail "personal-use license policy denied raw image writing"
+fi
+jq -e '.mode == "personal-use" and .decision == "allow" and .blockers == []' \
+    "$license_decision" >/dev/null || {
+    rm -f "$license_decision"
+    fail "personal-use license decision is malformed"
+}
+distribution_policy_sha256=$(shasum -a 256 "$distribution_policy" | awk 'NR == 1 {print $1}')
+manifest=$image.manifest.json
+[ -r "$manifest" ] || fail "raw image manifest is missing: $manifest"
+
+image_bytes=$(stat -f %z "$image")
+image_filename=$(basename -- "$image")
+image_sha256=$(shasum -a 256 "$image" | awk 'NR == 1 { print $1 }')
+[[ "$image_sha256" =~ ^[a-f0-9]{64}$ ]] || fail "raw image checksum is invalid"
+catalog_sha256=$(shasum -a 256 "$catalog" | awk 'NR == 1 { print $1 }')
+[[ "$catalog_sha256" =~ ^[a-f0-9]{64}$ ]] || fail "resolved catalog checksum is invalid"
+catalog_revision=$(jq -er '.catalog.revision | select(test("^[a-f0-9]{40}$"))' "$catalog")
+catalog_tree=$(jq -er '.catalog.tree | select(test("^[a-f0-9]{40}$"))' "$catalog")
+catalog_world=$(jq -c '
+  if has("world") then
+    {slug: .world.world.slug, media_id: .world.media.id}
+  else
+    null
+  end
+' "$catalog")
+jq -e \
+    --arg filename "$image_filename" \
+    --argjson bytes "$image_bytes" \
+    --arg image_sha256 "$image_sha256" \
+    --arg catalog_sha256 "$catalog_sha256" \
+    --arg revision "$catalog_revision" \
+    --arg tree "$catalog_tree" \
+    --arg distribution_policy_sha256 "$distribution_policy_sha256" \
+    --slurpfile license_decision "$license_decision" \
+    --argjson world "$catalog_world" '
+      . as $root |
+      keys == ["catalog", "image", "kind", "license", "schema_version", "world"] and
+      .schema_version == 2 and
+      .kind == "device-os-raw-image" and
+      .image == {filename: $filename, bytes: $bytes, sha256: $image_sha256} and
+      .catalog == {sha256: $catalog_sha256, revision: $revision, tree: $tree} and
+      (.license | keys == ["decision","distribution_policy_sha256","mode","selected_artifacts"]) and
+      .license.mode == "personal-use" and .license.decision == "allow" and
+      .license.distribution_policy_sha256 == $distribution_policy_sha256 and
+      ([.license.selected_artifacts[] | {id,kind}] ==
+       [$license_decision[0].selected_artifacts[] | {id,kind}]) and
+      ([$license_decision[0].selected_artifacts[] |
+         select(.kind == "bootloader" or .kind == "catalog-entry")] as $locked |
+       all($locked[]; . as $expected |
+         any($root.license.selected_artifacts[]; . == $expected))) and
+      (all(.license.selected_artifacts[];
+        (keys == ["id","kind","sha256","status"]) and
+        (.sha256 == null or (.sha256 | test("^[a-f0-9]{64}$"))) and
+        (.status == "personal-use-only" or .status == "redistribution-reviewed"))) and
+      .world == $world
+    ' "$manifest" >/dev/null ||
+    fail "raw image manifest does not match the image and selected media"
+rm -f "$license_decision"
+trap - EXIT HUP INT TERM
+
+info=$(mktemp /tmp/device-os-disk-info.XXXXXX)
+cleanup() {
+    rm -f "$info"
+}
+trap cleanup EXIT HUP INT TERM
+
+diskutil info -plist "$device" > "$info" || fail "cannot inspect $device"
+plist_value() {
+    plutil -extract "$1" raw -o - "$info"
+}
+
+[ "$(plist_value WholeDisk)" = true ] || fail "whole-disk target required"
+[ "$(plist_value Internal)" = false ] || fail "refusing an internal disk"
+[ "$(plist_value Removable)" = true ] || fail "target is not removable"
+[ "$(plist_value WritableMedia)" = true ] || fail "target is not writable"
+[ "$(plist_value VirtualOrPhysical)" = Physical ] || fail "target is not physical media"
+
+media_name=$(plist_value MediaName)
+device_bytes=$(plist_value TotalSize)
+device_identifier=${device#/dev/}
+serial=$(ioreg -r -c IOUSBMassStorageInterfaceNub -l -w 0 |
+awk -v bsd="$device_identifier" '
+  /^\+-o IOUSBMassStorageInterfaceNub/ { serial="" }
+  /"kUSBSerialNumberString" = / && serial == "" {
+    value=$0
+    sub(/^.*"kUSBSerialNumberString" = "/, "", value)
+    sub(/".*$/, "", value)
+    serial=value
+  }
+  index($0, "\"BSD Name\" = \"" bsd "\"") && serial != "" {
+    result=serial
+  }
+  END { if (result != "") print result }
+')
+[ -n "$serial" ] || fail "target has no readable USB serial"
+[ "$image_bytes" = "$device_bytes" ] ||
+    fail "image and target sizes differ: image=$image_bytes target=$device_bytes"
+
+prefix_bytes=1048576
+[ "$image_bytes" -gt "$prefix_bytes" ] || fail "raw image is too small"
+mbr_type=$(od -An -tu1 -j 450 -N 1 "$image" | tr -d '[:space:]')
+mbr_signature=$(od -An -tx1 -j 510 -N 2 "$image" | tr -d '[:space:]')
+[ "$mbr_signature" = 55aa ] || fail "raw image does not contain an MBR signature"
+if [ -z "$mbr_type" ] || [ "$mbr_type" -eq 0 ]; then
+    fail "raw image has no first MBR partition"
+fi
+[ "$mbr_type" -ne 238 ] || fail "GPT images are not supported by the two-phase macOS writer"
+body_bytes=$((image_bytes - prefix_bytes))
+
+expected="ERASE $device $media_name $serial $device_bytes"
+[ "$confirmation" = "$expected" ] ||
+    fail "exact confirmation required: $expected"
+
+# SHA-256 of the 1 MiB prefix (prefix) or of everything after it (body), read
+# in 1 MiB blocks. A byte-wise cmp of the raw device made a 30 GB readback take
+# longer than the write; sequential hashing runs at the USB read speed. The
+# target is exactly the image size, so a body read ends at the same byte.
+region_sha256() {
+    local value
+    case "$2" in
+        prefix) value=$(dd if="$1" bs=1m count=1 2>/dev/null | shasum -a 256 | awk 'NR == 1 { print $1 }') ||
+            fail "cannot read the $2 of $1" ;;
+        body) value=$(dd if="$1" bs=1m skip=1 2>/dev/null | shasum -a 256 | awk 'NR == 1 { print $1 }') ||
+            fail "cannot read the $2 of $1" ;;
+    esac
+    [[ "$value" =~ ^[a-f0-9]{64}$ ]] || fail "cannot hash the $2 of $1"
+    printf '%s\n' "$value"
+}
+
+preflight_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+emit_write_evidence pending
+
+image_body_sha256=$(region_sha256 "$image" body)
+image_prefix_sha256=$(region_sha256 "$image" prefix)
+
+echo "target: $device"
+echo "media: $media_name"
+echo "bytes: $device_bytes"
+echo "warning: all existing partitions and data will be erased"
+
+diskutil unmountDisk "$device"
+raw_device=/dev/r${device#/dev/}
+
+# Hide the old partition map before writing. Disk Arbitration cannot auto-mount
+# the new exFAT volumes while the image body is written and read back.
+dd if=/dev/zero of="$raw_device" bs=1m count=1 conv=notrunc
+sync
+dd if="$image" of="$raw_device" bs=1m skip=1 seek=1 conv=notrunc
+sync
+[ "$(region_sha256 "$raw_device" body)" = "$image_body_sha256" ] ||
+    fail "readback of the image body ($body_bytes bytes) does not match"
+
+# Expose the verified image only after its body is proven. macOS may then mount
+# an exFAT volume and update ordinary filesystem metadata, so verify the MBR and
+# boot prefix independently before immediately unmounting and ejecting.
+dd if="$image" of="$raw_device" bs=1m count=1 conv=notrunc
+sync
+[ "$(region_sha256 "$raw_device" prefix)" = "$image_prefix_sha256" ] ||
+    fail "readback of the first $prefix_bytes bytes does not match"
+diskutil unmountDisk "$device"
+diskutil eject "$device"
+
+emit_write_evidence passed "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+echo "write-image-macos: two-phase raw readback passed and $device was ejected"
