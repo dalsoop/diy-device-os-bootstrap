@@ -1,0 +1,115 @@
+#!/bin/bash
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -euo pipefail
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/../../.." && pwd)
+output=
+size=
+runtime=${DEVICE_OS_CONTAINER_RUNTIME:-}
+declare -a forwarded=()
+
+usage() {
+    cat >&2 <<EOF
+usage: $0 --output /absolute/path/device-os.raw --size EXACT_BYTES \\
+  [--runtime podman|docker] \\
+  [--runtime-artifact id=/absolute/path] \\
+  [--runtime-manifest id=/absolute/path]
+
+Builds an exact-size raw image in a privileged Debian 13 container. The
+checkout, output, cache, and runtime artifact paths remain on the host. Runtime
+artifacts must be inside this checkout so the container receives only one bind.
+EOF
+    exit 2
+}
+
+fail() {
+    echo "usb-media build-image-container: $*" >&2
+    exit 1
+}
+
+contained_path() {
+    local host_path=$1
+    [[ "$host_path" = /* ]] || fail "path must be absolute: $host_path"
+    case "$host_path" in
+        "$repo_root"/*) printf '/workspace/%s\n' "${host_path#"$repo_root"/}" ;;
+        *) fail "container path must stay inside the checkout: $host_path" ;;
+    esac
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --output) output=${2:-}; shift 2 ;;
+        --size) size=${2:-}; shift 2 ;;
+        --runtime) runtime=${2:-}; shift 2 ;;
+        --runtime-artifact|--runtime-manifest)
+            option=$1
+            assignment=${2:-}
+            case "$assignment" in *=*) ;; *) usage ;; esac
+            id=${assignment%%=*}
+            path=${assignment#*=}
+            forwarded+=("$option" "$id=$(contained_path "$path")")
+            shift 2
+            ;;
+        *) usage ;;
+    esac
+done
+
+[ "$(uname -s)" = Darwin ] || fail "this wrapper is for macOS"
+[ -n "$output" ] || usage
+[ -n "$size" ] || usage
+container_output=$(contained_path "$output")
+mkdir -p "$(dirname -- "$output")"
+
+if [ -z "$runtime" ]; then
+    if command -v podman >/dev/null 2>&1; then
+        runtime=podman
+    elif command -v docker >/dev/null 2>&1; then
+        runtime=docker
+    else
+        fail "Podman or Docker is required"
+    fi
+fi
+
+image=localhost/diy-device-os-media-builder:13.7
+# macOS ships Bash 3.2, where expanding an empty array under nounset fails.
+# Every scalar has already been validated, so disable nounset only around the
+# optional forwarded argument expansion.
+set +u
+case "$runtime" in
+    podman)
+        command -v podman >/dev/null 2>&1 || fail "podman is not installed"
+        podman machine start >/dev/null 2>&1 || true
+        connection=podman-machine-default-root
+        podman --connection "$connection" info >/dev/null ||
+            fail "the Podman machine is unavailable"
+        podman --connection "$connection" build \
+            --file "$script_dir/Containerfile.media-builder" \
+            --tag "$image" "$script_dir"
+        podman --connection "$connection" run --rm --privileged \
+            --volume "$repo_root:/workspace:rw" \
+            --workdir /workspace \
+            "$image" \
+            bash -lc 'git config --global --add safe.directory /workspace; exec "$@"' bash \
+            /workspace/engine/installer/usb-media/build-image-linux \
+            --output "$container_output" --size "$size" \
+            "${forwarded[@]}"
+        ;;
+    docker)
+        command -v docker >/dev/null 2>&1 || fail "docker is not installed"
+        docker info >/dev/null || fail "the Docker daemon is unavailable"
+        docker build --file "$script_dir/Containerfile.media-builder" \
+            --tag "$image" "$script_dir"
+        docker run --rm --privileged \
+            --volume "$repo_root:/workspace:rw" \
+            --workdir /workspace \
+            "$image" \
+            bash -lc 'git config --global --add safe.directory /workspace; exec "$@"' bash \
+            /workspace/engine/installer/usb-media/build-image-linux \
+            --output "$container_output" --size "$size" \
+            "${forwarded[@]}"
+        ;;
+    *) fail "unsupported container runtime: $runtime" ;;
+esac
+set -u

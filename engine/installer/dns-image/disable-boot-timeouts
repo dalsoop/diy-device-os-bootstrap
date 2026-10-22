@@ -1,0 +1,17 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+# debian-cd DISC_FINISH_HOOK arguments: TDIR MIRROR DISKNUM CDDIR ARCHES.
+[ "$#" -eq 5 ] && [ "$3" = 1 ] && [ "$5" = amd64 ] || exit 1
+bios_dir=$4/../boot$3/isolinux
+grub_cfg=$4/boot/grub/grub.cfg
+[ -d "$bios_dir" ] && [ -f "$grub_cfg" ] || exit 1
+# Debian's speech submenu overrides isolinux.cfg with a 30-second timer.
+# Change the build tree before debian-cd computes its filesystem checksums.
+for cfg in "$bios_dir"/*.cfg; do
+    [ -f "$cfg" ] || exit 1
+    sed -i -E 's/^([[:space:]]*[Tt][Ii][Mm][Ee][Oo][Uu][Tt])[[:space:]]+.*/\1 0/' "$cfg"
+done
+sed -i -E 's/^([[:space:]]*set[[:space:]]+timeout)=.*/\1=-1/' "$grub_cfg"

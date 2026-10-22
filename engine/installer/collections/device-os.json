@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "device-os",
+  "name": "DIY Device OS Catalog Reference",
+  "groups": [
+    { "id": "dns", "path": "images/01-dns", "menu_alias": "01 DNS 서버" },
+    { "id": "virtualization", "path": "images/02-virtualization", "menu_alias": "02 가상화 및 백업" },
+    { "id": "storage", "path": "images/03-storage", "menu_alias": "03 스토리지" },
+    { "id": "desktop", "path": "images/04-desktop", "menu_alias": "04 데스크톱" },
+    { "id": "tools", "path": "images/90-tools", "menu_alias": "90 점검 및 복구" }
+  ],
+  "entries": [
+    "proxmox-ve",
+    "proxmox-backup-server",
+    "truenas-scale",
+    "pop-os",
+    "debian-live"
+  ]
+}

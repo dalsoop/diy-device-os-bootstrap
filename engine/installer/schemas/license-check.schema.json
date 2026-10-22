@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dalsoop/diy-device-os-bootstrap/blob/main/engine/installer/schemas/license-check.schema.json",
+  "title": "License policy decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "mode", "decision", "selected_artifacts", "blockers", "warnings"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "mode": { "enum": ["personal-use", "source-release", "prebuilt-release"] },
+    "decision": { "enum": ["allow", "deny"] },
+    "selected_artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "blockers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "decision": { "const": "allow" } }, "required": ["decision"] },
+      "then": { "properties": { "blockers": { "maxItems": 0 } } }
+    },
+    {
+      "if": { "properties": { "decision": { "const": "deny" } }, "required": ["decision"] },
+      "then": { "properties": { "blockers": { "minItems": 1 } } }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "sha256", "status"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "kind": { "enum": ["bootloader", "catalog-entry", "runtime-artifact", "component", "final-artifact"] },
+        "sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "status": { "enum": ["personal-use-only", "redistribution-reviewed"] }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "artifact_id", "message"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "artifact_id": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+            { "type": "null" }
+          ]
+        },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

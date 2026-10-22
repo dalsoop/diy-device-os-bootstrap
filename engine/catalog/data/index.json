@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "name": "DIY Device OS Catalog",
+  "repository": "https://github.com/dalsoop/diy-device-os-bootstrap",
+  "bootloaders": [
+    { "id": "ventoy", "path": "data/bootloaders/ventoy.json" }
+  ],
+  "entries": [
+    { "id": "debian-live", "path": "data/entries/debian-live.json" },
+    { "id": "pop-os", "path": "data/entries/pop-os.json" },
+    { "id": "proxmox-backup-server", "path": "data/entries/proxmox-backup-server.json" },
+    { "id": "proxmox-ve", "path": "data/entries/proxmox-ve.json" },
+    { "id": "truenas-scale", "path": "data/entries/truenas-scale.json" }
+  ]
+}
+

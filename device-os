@@ -4,4 +4,4 @@
 set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-exec "$repo_root/installer/device-os" "$@"
+exec "$repo_root/engine/installer/device-os" "$@"

@@ -18,8 +18,8 @@ fail-closed policies. The Installer consumes that resolved plan and selects
 exactly the listed entry IDs from either the embedded public Catalog or the
 reviewed local-profile registry.
 
-`installer/collections/device-os.json` remains the menu-group definition and a
-legacy contributor reference selection. It is not the ordinary user's source
+`engine/installer/collections/device-os.json` remains the menu-group definition and a
+contributor-only reference selection. It is not the ordinary user's source
 of truth. When the World omits the DNS profile, the resolved USB plan sets the
 DNS enrollment reserve to zero.
 
@@ -28,6 +28,12 @@ prove a removable non-root device, readable serial, sufficient capacity, and an
 exact target-specific confirmation. Publishing an immutable completed World
 generation remains a separate future transaction after verified physical write
 and readback.
+
+## Alternatives
+
+- Keeping the Installer reference collection as the operator source was rejected because it could not represent personal assets, network intent, or multiple media passes.
+- Automatically appending every local profile was rejected because omitting DNS from World intent still retained DNS capacity and behavior.
+- Allowing World policy to authorize erasure was rejected because declarative review cannot identify the live device attached at execution time.
 
 ## Consequences
 

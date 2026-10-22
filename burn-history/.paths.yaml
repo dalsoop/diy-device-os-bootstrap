@@ -1,0 +1,15 @@
+apiVersion: homelab.gujo.dev/v1alpha1
+kind: WorldPlaybook
+
+metadata:
+  name: DIY Device OS Bootstrap
+
+spec:
+  timezone: Asia/Seoul
+  drafts:
+    - slug: gujo-home
+      path: home.yaml
+  generations:
+    root: logs/usb
+    idFormat: "{YYYYMMDDHHmmss}-{world-slug}"
+    publishAfter: verified-physical-usb-write

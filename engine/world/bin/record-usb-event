@@ -1,0 +1,364 @@
+#!/usr/bin/env ruby
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+
+require "fileutils"
+require "json"
+require "open3"
+require "optparse"
+require "securerandom"
+require "time"
+require "English"
+
+class EventError < StandardError; end
+
+def fail_event(message)
+  raise EventError, message
+end
+
+def read_json(path, label)
+  JSON.parse(File.read(path, encoding: "UTF-8"))
+rescue Errno::ENOENT, Errno::EACCES, JSON::ParserError => error
+  fail_event("cannot read #{label}: #{error.class}")
+end
+
+def atomic_json(path, value)
+  FileUtils.mkdir_p(File.dirname(path))
+  temporary = "#{path}.tmp.#{Process.pid}.#{SecureRandom.hex(4)}"
+  File.open(temporary, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |file|
+    file.write(JSON.pretty_generate(value))
+    file.write("\n")
+    file.flush
+    file.fsync
+  end
+  File.rename(temporary, path)
+ensure
+  FileUtils.rm_f(temporary) if defined?(temporary) && temporary
+end
+
+def contained_path(root, relative, label)
+  fail_event("#{label} must be a safe relative path") unless relative.is_a?(String)
+  segments = relative.split("/", -1)
+  fail_event("#{label} must be a safe relative path") if relative.start_with?("/") ||
+    segments.empty? || segments.any? { |segment| segment.empty? || segment == "." || segment == ".." }
+
+  root_path = File.realpath(root)
+  candidate = File.realpath(File.join(root_path, relative))
+  prefix = "#{root_path}/"
+  fail_event("#{label} escapes the repository") unless candidate.start_with?(prefix)
+  candidate
+rescue Errno::ENOENT, Errno::EACCES
+  fail_event("#{label} is missing or unreadable")
+end
+
+def strict_write_evidence(path, expected_device, expected_writer)
+  evidence = read_json(path, "write evidence")
+  expected_keys = %w[schema_version writer device_path target preflight_at completed_at readback]
+  fail_event("write evidence has unknown or missing fields") unless evidence.keys.sort == expected_keys.sort
+  fail_event("write evidence schema is unsupported") unless evidence["schema_version"] == 1
+  fail_event("write evidence writer does not match") unless evidence["writer"] == expected_writer
+  fail_event("write evidence device does not match") unless evidence["device_path"] == expected_device
+
+  target = evidence["target"]
+  fail_event("write evidence target is invalid") unless target.is_a?(Hash) &&
+    target.keys.sort == %w[bytes display_name].sort &&
+    target["display_name"].is_a?(String) && !target["display_name"].empty? &&
+    target["bytes"].is_a?(Integer) && target["bytes"].positive?
+
+  readback = evidence["readback"]
+  fail_event("write evidence readback is invalid") unless readback.is_a?(Hash) &&
+    readback.keys.sort == %w[method status].sort &&
+    readback["method"].is_a?(String) && !readback["method"].empty? &&
+    %w[pending passed].include?(readback["status"])
+
+  fail_event("write evidence timestamps are invalid") unless evidence["preflight_at"].is_a?(String) &&
+    (evidence["completed_at"].nil? || evidence["completed_at"].is_a?(String))
+  begin
+    preflight_at = Time.iso8601(evidence.fetch("preflight_at"))
+    completed_at = evidence["completed_at"] && Time.iso8601(evidence.fetch("completed_at"))
+  rescue ArgumentError
+    fail_event("write evidence timestamps are invalid")
+  end
+  if readback["status"] == "passed"
+    fail_event("passed readback lacks a valid completion time") unless completed_at && completed_at >= preflight_at
+  elsif completed_at
+    fail_event("pending readback cannot have a completion time")
+  end
+  evidence
+end
+
+def chown_tree(path)
+  return unless Process.uid.zero? && ENV["SUDO_UID"]&.match?(/\A[0-9]+\z/) &&
+    ENV["SUDO_GID"]&.match?(/\A[0-9]+\z/)
+
+  uid = Integer(ENV.fetch("SUDO_UID"), 10)
+  gid = Integer(ENV.fetch("SUDO_GID"), 10)
+  FileUtils.chown_R(uid, gid, path)
+end
+
+def event_time
+  if ENV["DEVICE_OS_TEST_MODE"] == "1" && ENV["DEVICE_OS_EVENT_TIME"]
+    Time.iso8601(ENV.fetch("DEVICE_OS_EVENT_TIME"))
+  else
+    Time.now
+  end
+end
+
+PUBLISHED_SCHEMA_VERSION = 2
+
+def published_record(record)
+  record.reject { |key, _value| key == "device_path" }.merge("schema_version" => PUBLISHED_SCHEMA_VERSION)
+end
+
+def publish_failed_event(events_root, event, pending_path)
+  year = event.fetch("started_at")[0, 4]
+  fail_event("event year is invalid") unless year&.match?(/\A[0-9]{4}\z/)
+  fail_event("event identity is invalid") unless event.fetch("event_id").match?(/\A[0-9]{14}-[a-z0-9-]+-[0-9a-f]{8}\z/)
+  destination = File.join(events_root, year, "#{event.fetch("event_id")}.json")
+  fail_event("event record already exists") if File.exist?(destination)
+  atomic_json(destination, published_record(event))
+  chown_tree(destination)
+  FileUtils.rm_f(pending_path)
+end
+
+begin
+options = {}
+parser = OptionParser.new do |opts|
+  opts.banner = "usage: record-usb-event --world-plan PATH --catalog PATH --writer MODE --device DEVICE -- WRITER [ARGS...]"
+  opts.on("--world-plan PATH") { |value| options[:world_plan] = value }
+  opts.on("--catalog PATH") { |value| options[:catalog] = value }
+  opts.on("--writer MODE") { |value| options[:writer] = value }
+  opts.on("--device DEVICE") { |value| options[:device] = value }
+end
+
+separator = ARGV.index("--")
+fail_event("writer command separator is required") unless separator
+wrapper_arguments = ARGV.shift(separator)
+ARGV.shift
+parser.parse!(wrapper_arguments)
+command = ARGV.dup
+
+%i[world_plan catalog writer device].each do |key|
+  fail_event("missing --#{key.to_s.tr("_", "-")}") if options[key].nil? || options[key].empty?
+end
+fail_event("unsupported writer mode") unless %w[linux-ventoy macos-mbr-last].include?(options[:writer])
+fail_event("writer command is missing") if command.empty?
+device_arguments = command.each_index.filter_map do |index|
+  command[index + 1] if command[index] == "--device"
+end
+fail_event("writer command must contain exactly one --device") unless device_arguments.length == 1
+fail_event("writer command device does not match event device") unless device_arguments.first == options[:device]
+
+script_root = File.realpath(File.join(__dir__, "../../.."))
+test_mode = ENV["DEVICE_OS_TEST_MODE"] == "1"
+fail_event("test mode cannot run as root") if test_mode && Process.uid.zero?
+repo_root = if test_mode && ENV["DEVICE_OS_EVENT_REPO_ROOT"]
+              File.realpath(ENV.fetch("DEVICE_OS_EVENT_REPO_ROOT"))
+            else
+              script_root
+            end
+world_root = if test_mode && ENV["DEVICE_OS_EVENT_OUTPUT_ROOT"]
+               File.expand_path(ENV.fetch("DEVICE_OS_EVENT_OUTPUT_ROOT"))
+             else
+               File.join(repo_root, "burn-history")
+             end
+
+unless test_mode
+  expected_writer = File.join(
+    repo_root,
+    options[:writer] == "linux-ventoy" ? "engine/installer/usb-media/write-usb-linux" : "engine/installer/usb-media/write-image-macos"
+  )
+  fail_event("unexpected writer command") unless File.realpath(command.first) == File.realpath(expected_writer)
+end
+
+world_plan = read_json(options[:world_plan], "World plan")
+catalog = read_json(options[:catalog], "media catalog")
+fail_event("World plan schema is unsupported") unless world_plan["schema_version"] == 1
+world = world_plan["world"]
+media = world_plan["media"]
+fail_event("World identity is invalid") unless world.is_a?(Hash) &&
+  world["slug"].is_a?(String) && world["slug"].match?(/\A[a-z0-9][a-z0-9-]*\z/) &&
+  world["timezone"].is_a?(String) && !world["timezone"].empty?
+fail_event("World media is invalid") unless media.is_a?(Hash) &&
+  media["id"].is_a?(String) && media["id"].match?(/\A[a-z0-9][a-z0-9-]*\z/)
+fail_event("catalog does not embed the selected World") unless catalog["world"] == world_plan
+
+catalog_identity = catalog["catalog"]
+fail_event("catalog identity is invalid") unless catalog_identity.is_a?(Hash) &&
+  catalog_identity["revision"].is_a?(String) && catalog_identity["revision"].match?(/\A[0-9a-f]{40}\z/) &&
+  catalog_identity["tree"].is_a?(String) && catalog_identity["tree"].match?(/\A[0-9a-f]{40}\z/)
+
+source = world_plan["source"]
+fail_event("World source is invalid") unless source.is_a?(Hash)
+world_source = contained_path(repo_root, source["world"], "World source")
+
+unless test_mode
+  head, _stderr, head_status = Open3.capture3("git", "-C", repo_root, "rev-parse", "--verify", "HEAD")
+  head = head.strip
+  fail_event("cannot resolve repository HEAD") unless head_status.success?
+  fail_event("catalog revision does not match repository HEAD") unless head == catalog_identity["revision"]
+  system("git", "-C", repo_root, "diff", "--quiet") || fail_event("tracked source changes are not committed")
+  system("git", "-C", repo_root, "diff", "--cached", "--quiet") || fail_event("staged source changes are not committed")
+end
+
+ENV["TZ"] = world.fetch("timezone")
+local_root = File.join(world_root, ".in-progress")
+pending_root = File.join(local_root, "pending")
+staging_root = File.join(local_root, "staging")
+events_root = File.join(world_root, "logs", "usb", "failed")
+generations_root = File.join(world_root, "logs", "usb")
+FileUtils.mkdir_p([pending_root, staging_root, events_root, generations_root], mode: 0o700)
+
+lock_path = File.join(local_root, "writer.lock")
+File.open(lock_path, File::RDWR | File::CREAT, 0o600) do |lock|
+  fail_event("another USB event is already active") unless lock.flock(File::LOCK_EX | File::LOCK_NB)
+
+  Dir.glob(File.join(pending_root, "*.json")).sort.each do |stale_path|
+    stale = read_json(stale_path, "pending event")
+    next unless stale["status"] == "pending"
+    stale_candidate = stale["generation_candidate"]
+    stale_event_id = stale["event_id"]
+    fail_event("pending generation identity is invalid") unless stale_candidate.is_a?(String) &&
+      stale_candidate.match?(/\A[0-9]{14}-[a-z0-9][a-z0-9-]*\z/) &&
+      stale_event_id.is_a?(String) && stale_event_id.match?(/\A[0-9]{14}-[a-z0-9-]+-[0-9a-f]{8}\z/)
+
+    completed_path = File.join(generations_root, stale_candidate, "event.json")
+    if File.file?(completed_path)
+      completed = read_json(completed_path, "completed event")
+      if completed["event_id"] == stale["event_id"] && completed["status"] == "succeeded"
+        FileUtils.rm_f(stale_path)
+        next
+      end
+    end
+
+    stale["status"] = "interrupted"
+    stale["finished_at"] = event_time.iso8601
+    stale["exit_code"] = nil
+    stale["failure_code"] = "previous-process-ended-without-result"
+    publish_failed_event(events_root, stale, stale_path)
+    Dir.glob(File.join(staging_root, "#{stale_candidate}.*")).each do |stale_stage|
+      FileUtils.rm_rf(stale_stage)
+    end
+  end
+
+  started = event_time
+  stamp = started.strftime("%Y%m%d%H%M%S")
+  generation_id = "#{stamp}-#{world.fetch("slug")}"
+  generation_path = File.join(generations_root, generation_id)
+  fail_event("generation ID collision: #{generation_id}") if File.exist?(generation_path)
+
+  event_id = "#{generation_id}-#{SecureRandom.hex(4)}"
+  pending_path = File.join(pending_root, "#{event_id}.json")
+  evidence_path = File.join(local_root, "#{event_id}.write-evidence.json")
+  base_event = {
+    "schema_version" => 1,
+    "event_id" => event_id,
+    "generation_candidate" => generation_id,
+    "generation_id" => nil,
+    "world_slug" => world.fetch("slug"),
+    "media_id" => media.fetch("id"),
+    "writer" => options.fetch(:writer),
+    "device_path" => options.fetch(:device),
+    "repository_revision" => catalog_identity.fetch("revision"),
+    "catalog_tree" => catalog_identity.fetch("tree"),
+    "status" => "pending",
+    "started_at" => started.iso8601,
+    "finished_at" => nil,
+    "exit_code" => nil,
+    "failure_code" => nil,
+    "target" => nil,
+    "readback" => nil
+  }
+  atomic_json(pending_path, base_event)
+
+  writer_status = nil
+  interrupted = false
+  begin
+    system({ "DEVICE_OS_WRITE_EVIDENCE" => evidence_path }, *command)
+    writer_status = $CHILD_STATUS
+  rescue Interrupt
+    interrupted = true
+  end
+
+  finished = event_time
+  evidence = nil
+  evidence_error = nil
+  if File.file?(evidence_path)
+    begin
+      evidence = strict_write_evidence(evidence_path, options.fetch(:device), options.fetch(:writer))
+    rescue EventError => error
+      evidence_error = error
+    end
+  end
+
+  child_success = writer_status&.success? && !interrupted
+  verified_success = child_success && evidence_error.nil? && evidence &&
+    evidence.dig("readback", "status") == "passed" && evidence["completed_at"].is_a?(String)
+
+  if verified_success
+    event = base_event.merge(
+      "generation_id" => generation_id,
+      "status" => "succeeded",
+      "finished_at" => finished.iso8601,
+      "exit_code" => 0,
+      "target" => evidence.fetch("target"),
+      "readback" => evidence.fetch("readback")
+    )
+    verification = evidence.merge(
+      "event_id" => event_id,
+      "generation_id" => generation_id,
+      "repository_revision" => catalog_identity.fetch("revision"),
+      "catalog_tree" => catalog_identity.fetch("tree")
+    )
+
+    stage = File.join(staging_root, "#{generation_id}.#{SecureRandom.hex(4)}")
+    FileUtils.mkdir_p(stage, mode: 0o700)
+    FileUtils.cp(world_source, File.join(stage, "world.yaml"))
+    atomic_json(File.join(stage, "world.lock.json"), world_plan)
+    atomic_json(File.join(stage, "media-manifest.json"), catalog)
+    atomic_json(File.join(stage, "verification.json"), published_record(verification))
+    atomic_json(File.join(stage, "event.json"), published_record(event))
+    chown_tree(stage)
+    File.rename(stage, generation_path)
+    FileUtils.rm_f(pending_path)
+    FileUtils.rm_f(evidence_path)
+    puts "USB event recorded: #{generation_id}"
+    puts "Generation path: #{generation_path}"
+    exit 0
+  end
+
+  exit_code = if interrupted
+                nil
+              elsif writer_status&.exited?
+                writer_status.exitstatus
+              elsif writer_status&.signaled?
+                128 + writer_status.termsig
+              end
+  failure_code = if interrupted
+                   "writer-interrupted"
+                 elsif !child_success
+                   "writer-exit-nonzero"
+                 elsif evidence_error
+                   "invalid-write-evidence"
+                 elsif evidence.nil?
+                   "write-evidence-missing"
+                 else
+                   "readback-not-passed"
+                 end
+  event = base_event.merge(
+    "status" => interrupted ? "cancelled" : "failed",
+    "finished_at" => finished.iso8601,
+    "exit_code" => exit_code,
+    "failure_code" => failure_code,
+    "target" => evidence&.fetch("target", nil),
+    "readback" => evidence&.fetch("readback", nil)
+  )
+  publish_failed_event(events_root, event, pending_path)
+  FileUtils.rm_f(evidence_path)
+  warn "USB event did not publish a generation: #{failure_code}"
+  exit(exit_code && exit_code.positive? ? exit_code : 1)
+end
+rescue EventError => error
+  warn "record-usb-event: #{error.message}"
+  exit 1
+end

@@ -1,0 +1,36 @@
+.DS_Store
+.env
+.env.*
+
+# Private files never committed
+keys/*
+!keys/README.md
+os-installs/*/hardware.conf
+.in-progress/
+
+# Generated plans, caches, downloads, and media
+.device-os/
+**/.device-os/
+artifacts/
+cache/
+downloads/
+work/
+*.iso
+*.img
+*.raw
+*.qcow2
+*.deb
+*.tar
+*.tar.gz
+
+# Credentials and recovery material
+secrets/
+credentials/
+*.age
+*.key
+*.pem
+id_*
+
+# Logs are tracked records, even where a global ignore template excludes logs/
+!logs/
+!logs/**

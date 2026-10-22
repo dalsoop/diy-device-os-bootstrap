@@ -1,0 +1,33 @@
+Template: dns-appliance/role
+Type: select
+Choices: dns01, dns02, dns03
+Description: Choose the DNS appliance to install
+ Debian OS and DNS services will be installed together. Use a different role
+ for each machine. Completed roles require separate reinstall authorization.
+Description-ko.UTF-8: 설치할 DNS 서버 역할을 선택하세요
+ Debian OS와 DNS 서비스를 같이 설치합니다. 장비마다 다른 역할을 선택하세요.
+
+Template: dns-appliance/interface
+Type: select
+Choices: ${choices}
+Description: Choose the wired LAN interface
+ Connect this interface to the router before continuing.
+Description-ko.UTF-8: 공유기에 연결한 유선 LAN 인터페이스를 선택하세요
+ 계속하기 전에 이 인터페이스를 공유기에 연결하세요.
+
+Template: dns-appliance/erase
+Type: string
+Description: Confirm Debian OS + DNS installation and disk erasure
+ Role: ${role}; address: ${address}; gateway: ${gateway}
+ .
+ ALL DATA on ${disk} will be erased.
+ Model: ${model}; serial: ${serial}; size: ${bytes} bytes.
+ .
+ Type exactly: ${confirmation}
+Description-ko.UTF-8: Debian OS + DNS 설치와 내부 디스크 지우기를 확인하세요
+ 역할: ${role}; 주소: ${address}; 게이트웨이: ${gateway}
+ .
+ ${disk}의 모든 데이터가 지워집니다.
+ 모델: ${model}; 일련번호: ${serial}; 크기: ${bytes} 바이트.
+ .
+ 다음 문구를 정확히 입력하세요: ${confirmation}

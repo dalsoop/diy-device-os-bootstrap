@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dalsoop/diy-device-os-bootstrap/blob/main/engine/installer/schemas/dns-build-manifest.schema.json",
+  "title": "DNS composite-image build manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_id",
+    "build_id",
+    "install_mode",
+    "iso",
+    "iso_sha256",
+    "distribution_status",
+    "component_registry",
+    "component_registry_sha256",
+    "distribution_policy_sha256",
+    "components",
+    "sbom",
+    "sbom_sha256",
+    "debian_point_release",
+    "debian_snapshot",
+    "technitium_version",
+    "technitium_image_digest",
+    "technitium_archive_sha256",
+    "tailscale_version",
+    "tailscale_archive_sha256",
+    "source_revision",
+    "source_repository",
+    "source_archive"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "artifact_id": { "const": "dns-appliance" },
+    "build_id": { "type": "string", "minLength": 1 },
+    "install_mode": { "enum": ["reviewed", "guided"] },
+    "iso": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*\\.iso$" },
+    "iso_sha256": { "$ref": "#/$defs/sha256" },
+    "distribution_status": { "enum": ["personal-use-only", "redistribution-reviewed"] },
+    "component_registry": { "const": "component-redistribution-registry.json" },
+    "component_registry_sha256": { "$ref": "#/$defs/sha256" },
+    "distribution_policy_sha256": { "$ref": "#/$defs/sha256" },
+    "sbom": { "const": "sbom.spdx.json" },
+    "sbom_sha256": { "$ref": "#/$defs/sha256" },
+    "components": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "prefixItems": [
+        { "$ref": "#/$defs/debianStatus" },
+        { "$ref": "#/$defs/technitiumStatus" },
+        { "$ref": "#/$defs/tailscaleStatus" },
+        { "$ref": "#/$defs/tailscaleReportStatus" },
+        { "$ref": "#/$defs/sourceStatus" }
+      ],
+      "items": false
+    },
+    "debian_point_release": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "debian_snapshot": { "type": "string", "pattern": "^[0-9]{8}T[0-9]{6}Z$" },
+    "technitium_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "technitium_image_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "technitium_archive_sha256": { "$ref": "#/$defs/sha256" },
+    "tailscale_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "tailscale_archive_sha256": { "$ref": "#/$defs/sha256" },
+    "source_revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "source_repository": { "const": "https://github.com/dalsoop/diy-device-os-bootstrap" },
+    "source_archive": { "type": "string", "pattern": "^https://github\\.com/dalsoop/diy-device-os-bootstrap/archive/[a-f0-9]{40}\\.tar\\.gz$" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "componentStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "status": { "enum": ["personal-use-only", "redistribution-reviewed"] }
+      }
+    },
+    "debianStatus": { "allOf": [{ "$ref": "#/$defs/componentStatus" }, { "properties": { "id": { "const": "debian-package-closure" } } }] },
+    "technitiumStatus": { "allOf": [{ "$ref": "#/$defs/componentStatus" }, { "properties": { "id": { "const": "technitium-oci" } } }] },
+    "tailscaleStatus": { "allOf": [{ "$ref": "#/$defs/componentStatus" }, { "properties": { "id": { "const": "tailscale-archive" } } }] },
+    "tailscaleReportStatus": { "allOf": [{ "$ref": "#/$defs/componentStatus" }, { "properties": { "id": { "const": "tailscale-dependency-report" } } }] },
+    "sourceStatus": { "allOf": [{ "$ref": "#/$defs/componentStatus" }, { "properties": { "id": { "const": "repository-source-snapshot" } } }] }
+  }
+}

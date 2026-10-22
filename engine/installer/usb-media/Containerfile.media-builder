@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+FROM docker.io/library/debian:13.7-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates coreutils dosfstools exfatprogs fdisk findutils git gzip jq mount \
+    parted python3 tar udev util-linux && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace

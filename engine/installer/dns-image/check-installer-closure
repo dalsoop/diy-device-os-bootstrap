@@ -1,0 +1,108 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Verify that every package the installer will put on the target disk is in
+# the offline DVD package list: the union of the simple-cdd profile packages
+# and installer-target-packages. Any absence fails; there is no warning mode.
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+
+fail() {
+    echo "check-installer-closure: $*" >&2
+    exit 1
+}
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
+    fail "usage: check-installer-closure DEBIAN-PACKAGES.txt [PROFILE.packages [INSTALLER-TARGET-PACKAGES]]"
+fi
+inventory=$1
+profile=${2:-$script_dir/simple-cdd/profiles/dns.packages}
+installer_list=${3:-$script_dir/installer-target-packages}
+for input in "$inventory" "$profile" "$installer_list"; do
+    if [ ! -f "$input" ] || [ ! -r "$input" ]; then
+        fail "cannot read $input"
+    fi
+done
+
+# Pass file names through the environment so awk never treats a path that
+# contains '=' as a variable assignment.
+CLOSURE_INVENTORY=$inventory CLOSURE_PROFILE=$profile CLOSURE_INSTALLER=$installer_list \
+    awk -v prog=check-installer-closure '
+    function base(path, parts, n) {
+        n = split(path, parts, "/")
+        return parts[n]
+    }
+    function load_inventory(path, line, number, kv) {
+        number = 0
+        while ((getline line < path) > 0) {
+            number++
+            if (line ~ /^[[:space:]]*$/) continue
+            if (line !~ /^[a-z0-9][a-z0-9+.-]*=[^[:space:]=]+$/) {
+                printf "%s: malformed offline DVD package list line %d: %s\n", prog, number, line > "/dev/stderr"
+                bad = 1
+                continue
+            }
+            split(line, kv, "=")
+            have[kv[1]] = 1
+            inventory_count++
+        }
+        close(path)
+    }
+    function load_list(path, line, number, fields, count, i, name, label) {
+        number = 0
+        count = 0
+        label = base(path)
+        while ((getline line < path) > 0) {
+            number++
+            sub(/#.*/, "", line)
+            n = split(line, fields, /[[:space:]]+/)
+            for (i = 1; i <= n; i++) {
+                name = fields[i]
+                if (name == "") continue
+                if (name !~ /^[a-z0-9][a-z0-9+.-]+$/) {
+                    printf "%s: %s:%d: invalid package name: %s\n", prog, label, number, name > "/dev/stderr"
+                    bad = 1
+                    continue
+                }
+                count++
+                if (!(name in wanted)) {
+                    wanted[name] = label
+                    order[++wanted_count] = name
+                } else if (index(", " wanted[name] ", ", ", " label ", ") == 0) {
+                    wanted[name] = wanted[name] ", " label
+                }
+            }
+        }
+        close(path)
+        if (count == 0) {
+            printf "%s: %s lists no packages\n", prog, label > "/dev/stderr"
+            bad = 1
+        }
+    }
+    BEGIN {
+        load_inventory(ENVIRON["CLOSURE_INVENTORY"])
+        if (inventory_count == 0) {
+            printf "%s: offline DVD package list is empty\n", prog > "/dev/stderr"
+            bad = 1
+        }
+        load_list(ENVIRON["CLOSURE_PROFILE"])
+        load_list(ENVIRON["CLOSURE_INSTALLER"])
+        if (inventory_count > 0) {
+            for (k = 1; k <= wanted_count; k++) {
+                name = order[k]
+                if (!(name in have)) {
+                    printf "%s: missing from the offline DVD: %s (%s)\n", prog, name, wanted[name] > "/dev/stderr"
+                    missing++
+                    bad = 1
+                }
+            }
+        }
+        if (missing) {
+            printf "%s: %d of %d target packages are not on the offline DVD\n", prog, missing, wanted_count > "/dev/stderr"
+        }
+        if (bad) exit 1
+        printf "installer target packages: all %d are on the offline DVD\n", wanted_count
+    }
+'

@@ -1,0 +1,446 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+monorepo_root=$(CDPATH='' cd -- "$repo_root/../.." && pwd)
+builder_dir="$script_dir/simple-cdd"
+generated_dir="$builder_dir/generated"
+inventory_dir=${DNS_APPLIANCE_INVENTORY_DIR:-$monorepo_root/burn-history/os-installs}
+inventory_file=hardware.conf
+install_mode=${DNS_APPLIANCE_INSTALL_MODE:-reviewed}
+case "$install_mode" in
+    reviewed) ;;
+    guided) inventory_file=os.conf ;;
+    *) echo 'build-image: unknown install mode' >&2; exit 1 ;;
+esac
+authorized_keys=${DNS_APPLIANCE_AUTHORIZED_KEYS:-$monorepo_root/burn-history/keys/operator-authorized-keys}
+age_recipient=${DNS_APPLIANCE_AGE_RECIPIENT:-$monorepo_root/burn-history/keys/age-recipient}
+cache_dir=${DNS_APPLIANCE_CACHE_DIR:-$repo_root/cache}
+artifact_dir=${DNS_APPLIANCE_ARTIFACT_DIR:-$repo_root/artifacts}
+# shellcheck disable=SC1091
+. "$repo_root/build/locks/sources.env"
+technitium_archive=$cache_dir/technitium-dns-$TECHNITIUM_VERSION-amd64.oci.tar
+tailscale_archive=$cache_dir/tailscale-$TAILSCALE_VERSION-amd64.tgz
+tailscale_licenses=$cache_dir/tailscale-$TAILSCALE_VERSION-dependency-licenses.md
+source_repository=${DNS_APPLIANCE_SOURCE_REPOSITORY:-$SOURCE_REPOSITORY}
+distribution_policy=$repo_root/build/distribution-policy.json
+distribution_validator=$repo_root/build/verify-distribution-contracts
+
+fail() {
+    echo "build-image: $*" >&2
+    exit 1
+}
+
+[ "$(uname -s)" = Linux ] || fail "build on an amd64 Debian 13 host"
+[ "$(uname -m)" = x86_64 ] || fail "amd64 builder required"
+[ -r /etc/os-release ] || fail "cannot identify builder OS"
+# shellcheck source=/dev/null
+. /etc/os-release
+[ "${ID:-}" = debian ] || fail "Debian builder required"
+[ "${VERSION_CODENAME:-}" = trixie ] || fail "Debian 13 trixie builder required"
+command -v build-simple-cdd >/dev/null 2>&1 || fail "install the simple-cdd package"
+command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
+command -v skopeo >/dev/null 2>&1 || fail "skopeo is required"
+command -v git >/dev/null 2>&1 || fail "git is required"
+command -v jq >/dev/null 2>&1 || fail "jq is required"
+command -v xorriso >/dev/null 2>&1 || fail "xorriso is required"
+
+case "$source_repository" in
+    https://*) ;;
+    *) fail "source repository must use HTTPS" ;;
+esac
+[ "$source_repository" = "$SOURCE_REPOSITORY" ] ||
+    fail "source repository override does not match the immutable lock"
+git -C "$monorepo_root" diff --quiet -- ||
+    fail "tracked source changes are not committed"
+git -C "$monorepo_root" diff --cached --quiet -- ||
+    fail "staged source changes are not committed"
+source_revision=$(git -C "$monorepo_root" rev-parse --verify HEAD)
+printf '%s' "$source_revision" | grep -Eq '^[0-9a-f]{40}$' ||
+    fail "source revision is not a full Git commit"
+source_archive=$source_repository/archive/$source_revision.tar.gz
+
+for legal_file in LICENSE docs/licenses/LICENSE_HISTORY.md docs/licenses/THIRD_PARTY_NOTICES.md \
+    docs/licenses/Tailscale-BSD-3-Clause.txt; do
+    [ -r "$monorepo_root/$legal_file" ] || fail "missing legal file: $legal_file"
+done
+for contract_file in \
+    "$distribution_policy" \
+    "$distribution_validator" \
+    "$repo_root/schemas/component-redistribution-registry.schema.json" \
+    "$repo_root/schemas/component-review-record.schema.json" \
+    "$repo_root/schemas/dns-build-manifest.schema.json" \
+    "$repo_root/schemas/dns-final-review-record.schema.json"; do
+    [ -r "$contract_file" ] || fail "missing distribution contract: $contract_file"
+done
+
+"$repo_root/build/verify-locks"
+installed_simple_cdd=$(dpkg-query -W -f='${Version}' simple-cdd 2>/dev/null || true)
+case "$installed_simple_cdd" in
+    "$SIMPLE_CDD_VERSION"|"$SIMPLE_CDD_VERSION"+*) ;;
+    *) fail "simple-cdd $SIMPLE_CDD_VERSION required; found ${installed_simple_cdd:-missing}" ;;
+esac
+
+[ -r "$authorized_keys" ] || fail "missing operator public key: $authorized_keys"
+awk '
+    /^[[:space:]]*(#|$)/ { next }
+    $1 ~ /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-)/ { found=1; next }
+    { bad=1 }
+    END { exit !(found && !bad) }
+' "$authorized_keys" || fail "authorized-keys input must contain only SSH public keys"
+
+[ -r "$age_recipient" ] || fail "missing age recipient: $age_recipient"
+recipient=$(awk '!/^[[:space:]]*(#|$)/ { print; exit }' "$age_recipient")
+printf '%s' "$recipient" | grep -Eq '^age1[0-9a-z]{58}$' ||
+    fail "age recipient must contain one native age1 recipient"
+
+[ -s "$technitium_archive" ] ||
+    fail "missing pinned OCI archive; run dns-image/fetch-locked-sources"
+archive_digest=$(skopeo inspect --format '{{.Digest}}' "oci-archive:$technitium_archive")
+[ "$archive_digest" = "$TECHNITIUM_AMD64_DIGEST" ] ||
+    fail "Technitium OCI archive digest mismatch: $archive_digest"
+[ -s "$tailscale_archive" ] ||
+    fail "missing pinned Tailscale archive; run dns-image/fetch-locked-sources"
+printf '%s  %s\n' "$TAILSCALE_AMD64_SHA256" "$tailscale_archive" |
+    sha256sum -c - >/dev/null || fail "Tailscale archive SHA-256 mismatch"
+[ -s "$tailscale_licenses" ] ||
+    fail "missing pinned Tailscale license inventory; run dns-image/fetch-locked-sources"
+# Assigned by the reviewed sources.env lock file.
+# shellcheck disable=SC2153
+printf '%s  %s\n' "$TAILSCALE_LICENSES_SHA256" "$tailscale_licenses" |
+    sha256sum -c - >/dev/null || fail "Tailscale license inventory SHA-256 mismatch"
+
+mkdir -p "$generated_dir"
+for old in dns01.conf dns02.conf dns03.conf install-mode operator-authorized-keys age-recipient \
+    technitium.oci.tar tailscale.tgz sources.env enrollment-record.schema.json \
+    diy-device-os-bootstrap-license.txt license-history.md third-party-notices.md \
+    tailscale-license.txt tailscale-dependency-licenses.md source.md source-snapshot.tar.gz \
+    distribution-policy.json distribution-status.md \
+    component-redistribution-registry.schema.json component-review-record.schema.json \
+    dns-build-manifest.schema.json dns-final-review-record.schema.json; do
+    rm -f "$generated_dir/$old"
+done
+
+required_hashes='expected_product_name_sha256 expected_product_sku_sha256 expected_system_serial_sha256 expected_system_uuid_sha256 expected_mac_sha256 expected_disk_model_sha256 expected_disk_serial_sha256'
+enabled_count=0
+
+for role in dns01 dns02 dns03; do
+    source_file=$inventory_dir/$role/$inventory_file
+    [ -r "$source_file" ] || fail "missing inventory: $source_file"
+    /bin/sh "$script_dir/scripts/install-gate" validate-profile "$source_file" "$role"
+    grep -q "^role=$role$" "$source_file" || fail "$role has the wrong role field"
+    for key in address prefix_length netmask gateway dns_servers domain lan_cidr management_cidr cluster_domain; do
+        value=$(awk -F= -v wanted="$key" '$1 == wanted { print $2 }' "$source_file")
+        [ -n "$value" ] || fail "$role is missing $key"
+    done
+    enabled=$(awk -F= '$1 == "destructive_install_enabled" { print $2 }' "$source_file")
+    case "$enabled" in
+        true)
+            [ "$install_mode" = reviewed ] || fail "guided network profiles must be disabled"
+            enabled_count=$((enabled_count + 1))
+            grep -q 'REPLACE_' "$source_file" && fail "$role contains placeholders"
+            for key in $required_hashes; do
+                value=$(awk -F= -v wanted="$key" '$1 == wanted { print $2 }' "$source_file")
+                printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}$' ||
+                    fail "$role has an invalid $key"
+            done
+            min_bytes=$(awk -F= '$1 == "expected_disk_min_bytes" { print $2 }' "$source_file")
+            case "$min_bytes" in
+                ''|*[!0-9]*) fail "$role has an invalid expected_disk_min_bytes" ;;
+            esac
+            [ "$min_bytes" -gt 0 ] || fail "$role disk size must be greater than zero"
+            ;;
+        false) ;;
+        *) fail "$role has an invalid destructive_install_enabled value" ;;
+    esac
+    install -m 0644 "$source_file" "$generated_dir/$role.conf"
+done
+
+if [ "$install_mode" = reviewed ]; then
+    [ "$enabled_count" -eq 1 ] ||
+        fail "exactly one role must have destructive_install_enabled=true; found $enabled_count"
+else
+    [ "$enabled_count" -eq 0 ] || fail "guided media must not embed enabled hardware inventories"
+fi
+printf '%s\n' "$install_mode" > "$generated_dir/install-mode"
+
+install -m 0644 "$authorized_keys" "$generated_dir/operator-authorized-keys"
+printf '%s\n' "$recipient" > "$generated_dir/age-recipient"
+install -m 0644 "$technitium_archive" "$generated_dir/technitium.oci.tar"
+install -m 0644 "$tailscale_archive" "$generated_dir/tailscale.tgz"
+install -m 0644 "$repo_root/build/locks/sources.env" "$generated_dir/sources.env"
+install -m 0644 "$repo_root/schemas/enrollment-record.schema.json" \
+    "$generated_dir/enrollment-record.schema.json"
+install -m 0644 "$monorepo_root/LICENSE" \
+    "$generated_dir/diy-device-os-bootstrap-license.txt"
+install -m 0644 "$monorepo_root/docs/licenses/LICENSE_HISTORY.md" \
+    "$generated_dir/license-history.md"
+install -m 0644 "$monorepo_root/docs/licenses/THIRD_PARTY_NOTICES.md" \
+    "$generated_dir/third-party-notices.md"
+install -m 0644 "$monorepo_root/docs/licenses/Tailscale-BSD-3-Clause.txt" \
+    "$generated_dir/tailscale-license.txt"
+install -m 0644 "$tailscale_licenses" \
+    "$generated_dir/tailscale-dependency-licenses.md"
+install -m 0644 "$distribution_policy" "$generated_dir/distribution-policy.json"
+distribution_policy_sha256=$(sha256sum "$distribution_policy" | awk '{print $1}')
+for schema in component-redistribution-registry component-review-record dns-build-manifest \
+    dns-final-review-record; do
+    install -m 0644 "$repo_root/schemas/$schema.schema.json" \
+        "$generated_dir/$schema.schema.json"
+done
+source_snapshot_partial=$generated_dir/source-snapshot.tar.gz.partial
+trap 'rm -f "$source_snapshot_partial"' EXIT HUP INT TERM
+git -C "$monorepo_root" archive --format=tar.gz \
+    --prefix="diy-device-os-bootstrap-$source_revision/" \
+    --output="$source_snapshot_partial" "$source_revision"
+mv "$source_snapshot_partial" "$generated_dir/source-snapshot.tar.gz"
+trap - EXIT HUP INT TERM
+{
+    echo "# Corresponding Source"
+    echo
+    echo "Project: DIY Device OS Bootstrap"
+    echo "License: GPL-3.0-only"
+    echo "Source revision: $source_revision"
+    echo "Repository: $source_repository"
+    echo "Source archive: $source_archive"
+    echo "Bundled source snapshot: source-snapshot.tar.gz"
+    echo
+    echo "Third-party payloads retain their upstream terms."
+    echo "See third-party-notices.md and the notices supplied with each payload."
+} > "$generated_dir/source.md"
+{
+    echo "# DNS Composite Image Distribution Status"
+    echo
+    echo "Status: personal-use-only"
+    echo
+    echo "Policy: $DISTRIBUTION_POLICY_ID"
+    echo "Policy SHA-256: $distribution_policy_sha256"
+    echo
+    echo "Components:"
+    echo "- debian-package-closure: personal-use-only"
+    echo "- technitium-oci: personal-use-only"
+    echo "- tailscale-archive: personal-use-only"
+    echo "- tailscale-dependency-report: personal-use-only"
+    echo "- repository-source-snapshot: personal-use-only"
+    echo
+    echo "This build and every recorded component remain unreviewed for redistribution."
+    echo "Build and fetch evidence does not create reviewed status."
+    echo "A separate reviewer-authored component record and final DNS review record are required before any reviewed claim."
+    echo "Any SPDX NOASSERTION value blocks promotion."
+} > "$generated_dir/distribution-status.md"
+
+"$script_dir/fetch-debian-installer"
+mkdir -p "$artifact_dir"
+# A manifest, SBOM or checksum list from an earlier build must never sit
+# beside an ISO that has not passed this build's checks.
+rm -f "$artifact_dir/build-manifest.json" "$artifact_dir/build-manifest.json.tmp" \
+    "$artifact_dir/sbom.spdx.json" "$artifact_dir/sbom.spdx.json.tmp" \
+    "$artifact_dir/SHA256SUMS"
+cd "$builder_dir"
+DNS_APPLIANCE_DI_DIR="$cache_dir/debian-installer-$DEBIAN_SNAPSHOT" \
+    DISC_FINISH_HOOK="$script_dir/disable-boot-timeouts" \
+    build-simple-cdd --verbose --logfile "$artifact_dir/simple-cdd.log" \
+        --conf simple-cdd.conf --profiles dns
+
+set -- images/*.iso
+[ -e "$1" ] || fail "Simple-CDD completed without an ISO"
+mkdir -p "$artifact_dir"
+sha256sum "$@" | tee "$artifact_dir/SHA256SUMS"
+
+iso=$1
+iso_verify_dir=$(mktemp -d)
+cleanup_iso_verify() {
+    chmod -R u+w "$iso_verify_dir"
+    rm -rf "$iso_verify_dir"
+}
+trap cleanup_iso_verify EXIT HUP INT TERM
+xorriso -osirrox on -indev "$iso" -extract /boot/grub/grub.cfg "$iso_verify_dir/grub.cfg" \
+    >/dev/null 2>&1 || fail "built ISO is missing its UEFI menu"
+xorriso -osirrox on -indev "$iso" -extract /isolinux "$iso_verify_dir/isolinux" \
+    >/dev/null 2>&1 || fail "built ISO is missing its BIOS menu"
+awk '
+    /^[[:space:]]*set[[:space:]]+timeout=/ {
+        if ($0 !~ /^[[:space:]]*set[[:space:]]+timeout=-1[[:space:]]*$/) bad=1
+    }
+    END {exit bad ? 1 : 0}
+' "$iso_verify_dir/grub.cfg" || fail "built ISO enables automatic UEFI boot"
+awk '
+    toupper($1) == "TIMEOUT" && $2 != "0" {bad=1}
+    END {exit bad ? 1 : 0}
+' "$iso_verify_dir"/isolinux/*.cfg || fail "built ISO enables automatic BIOS boot"
+for embedded in install-gate prepare-installer dns-finish-install default.preseed disk-identity guided.templates install-mode dns01.conf dns02.conf dns03.conf \
+    operator-authorized-keys age-recipient sources.env \
+    enrollment-record.schema.json \
+    diy-device-os-bootstrap-license.txt license-history.md \
+    third-party-notices.md tailscale-license.txt tailscale-dependency-licenses.md \
+    source.md source-snapshot.tar.gz distribution-policy.json distribution-status.md \
+    component-redistribution-registry.schema.json component-review-record.schema.json \
+    dns-build-manifest.schema.json dns-final-review-record.schema.json; do
+    xorriso -osirrox on -indev "$iso" \
+        -extract "/simple-cdd/$embedded" "$iso_verify_dir/$embedded" \
+        >/dev/null 2>&1 || fail "built ISO is missing /simple-cdd/$embedded"
+done
+cmp -s "$script_dir/scripts/install-gate" "$iso_verify_dir/install-gate" ||
+    fail "built ISO contains a stale install-gate"
+cmp -s "$script_dir/scripts/prepare-installer" "$iso_verify_dir/prepare-installer" ||
+    fail "built ISO contains a stale installer preparation step"
+cmp -s "$script_dir/scripts/dns-finish-install" "$iso_verify_dir/dns-finish-install" ||
+    fail "built ISO contains a stale appliance setup step"
+if xorriso -indev "$iso" -find /simple-cdd -name '*.postinst' 2>/dev/null | grep -q .; then
+    fail "built ISO contains a simple-cdd postinst; appliance setup must run as preseed/late_command"
+fi
+cmp -s "$builder_dir/profiles/default.preseed" "$iso_verify_dir/default.preseed" ||
+    fail "built ISO contains stale installer answers"
+cmp -s "$script_dir/disk-identity" "$iso_verify_dir/disk-identity" ||
+    fail "built ISO contains a stale disk-identity reader"
+cmp -s "$script_dir/scripts/guided.templates" "$iso_verify_dir/guided.templates" ||
+    fail "built ISO contains stale guided installer questions"
+cmp -s "$generated_dir/install-mode" "$iso_verify_dir/install-mode" ||
+    fail "built ISO contains a stale install mode"
+for role in dns01 dns02 dns03; do
+    cmp -s "$generated_dir/$role.conf" "$iso_verify_dir/$role.conf" ||
+        fail "built ISO contains stale inventory for $role"
+done
+cmp -s "$generated_dir/operator-authorized-keys" \
+    "$iso_verify_dir/operator-authorized-keys" ||
+    fail "built ISO contains stale operator authorized keys"
+cmp -s "$generated_dir/age-recipient" "$iso_verify_dir/age-recipient" ||
+    fail "built ISO contains a stale age recipient"
+cmp -s "$generated_dir/sources.env" "$iso_verify_dir/sources.env" ||
+    fail "built ISO contains stale source locks"
+cmp -s "$generated_dir/enrollment-record.schema.json" \
+    "$iso_verify_dir/enrollment-record.schema.json" ||
+    fail "built ISO contains a stale enrollment schema"
+cmp -s "$generated_dir/source.md" "$iso_verify_dir/source.md" ||
+    fail "built ISO contains stale source provenance"
+for licensing_payload in \
+    diy-device-os-bootstrap-license.txt license-history.md \
+    third-party-notices.md tailscale-license.txt tailscale-dependency-licenses.md \
+    source-snapshot.tar.gz distribution-policy.json distribution-status.md \
+    component-redistribution-registry.schema.json component-review-record.schema.json \
+    dns-build-manifest.schema.json dns-final-review-record.schema.json; do
+    cmp -s "$generated_dir/$licensing_payload" "$iso_verify_dir/$licensing_payload" ||
+        fail "built ISO contains a stale licensing payload: $licensing_payload"
+done
+
+packages_file=$artifact_dir/debian-packages.txt
+mirror_dir=$builder_dir/tmp/mirror
+find "$mirror_dir" -type f -name Packages -exec awk '
+    /^Package: / { package=$2 }
+    /^Version: / { if (package != "") print package "=" $2; package="" }
+' {} + 2>/dev/null | LC_ALL=C sort -u > "$packages_file"
+[ -s "$packages_file" ] || fail "Debian package inventory is empty"
+
+package_hashes=$artifact_dir/debian-package-sha256s.txt
+find "$mirror_dir" -type f \( -name '*.deb' -o -name '*.udeb' \) \
+    -exec sha256sum {} + 2>/dev/null |
+    sed "s#$mirror_dir/##" | LC_ALL=C sort > "$package_hashes"
+[ -s "$package_hashes" ] || fail "Debian package checksum inventory is empty"
+
+# Build-stage static checks: every package the installer puts on the target
+# must be on the DVD, and the installer font must draw guided.templates. A
+# failure deletes the ISO and leaves no manifest, SBOM or checksum list.
+"$script_dir/gate-built-iso" "$iso" "$packages_file" "$artifact_dir" ||
+    fail "built ISO failed the installer package or glyph check"
+
+iso_sha256=$(sha256sum "$iso" | awk '{print $1}')
+archive_sha256=$(sha256sum "$technitium_archive" | awk '{print $1}')
+tailscale_sha256=$(sha256sum "$tailscale_archive" | awk '{print $1}')
+tailscale_licenses_sha256=$(sha256sum "$tailscale_licenses" | awk '{print $1}')
+source_snapshot_sha256=$(sha256sum "$generated_dir/source-snapshot.tar.gz" | awk '{print $1}')
+created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+short_sha=$(printf '%s' "$iso_sha256" | cut -c1-16)
+build_id="debian-$DEBIAN_POINT_RELEASE-technitium-$TECHNITIUM_VERSION-$short_sha"
+
+closure_manifest=$artifact_dir/debian-package-closure.manifest
+packages_sha256=$(sha256sum "$packages_file" | awk '{print $1}')
+package_hashes_sha256=$(sha256sum "$package_hashes" | awk '{print $1}')
+{
+    echo "format=dns-debian-package-closure-v1"
+    echo "debian_point_release=$DEBIAN_POINT_RELEASE"
+    echo "debian_snapshot=$DEBIAN_SNAPSHOT"
+    echo "packages_sha256=$packages_sha256"
+    echo "package_artifacts_sha256=$package_hashes_sha256"
+    echo "[packages]"
+    cat "$packages_file"
+    echo "[package-artifacts]"
+    cat "$package_hashes"
+} > "$closure_manifest"
+closure_sha256=$(sha256sum "$closure_manifest" | awk '{print $1}')
+
+jq -n \
+    --arg name "dns-appliance-installer-$build_id" \
+    --arg debian "$DEBIAN_POINT_RELEASE@$DEBIAN_SNAPSHOT" \
+    --arg technitium "$TECHNITIUM_IMAGE@$TECHNITIUM_AMD64_DIGEST" \
+    --arg tailscale "$TAILSCALE_VERSION" \
+    --arg revision "$source_revision" \
+    --arg source_repository "$source_repository" \
+    --arg source_archive "$source_archive" \
+    --arg created "$created" \
+    --rawfile packages "$packages_file" \
+    '{spdxVersion:"SPDX-2.3",dataLicense:"CC0-1.0",SPDXID:"SPDXRef-DOCUMENT",name:$name,documentNamespace:($source_repository+"/sbom/"+$revision+"/"+$name),creationInfo:{created:$created,creators:["Tool: diy-device-os-bootstrap/engine/installer/dns-image/build-image"]},documentDescribes:["SPDXRef-DebianPackageClosure","SPDXRef-Technitium","SPDXRef-Tailscale","SPDXRef-TailscaleDependencyReport","SPDXRef-DIYDeviceOSBootstrap"],packages:([($packages|split("\n")[]|select(length>0))|{name:(split("=")[0]),versionInfo:(split("=")[1]),SPDXID:("SPDXRef-Package-"+(gsub("[^A-Za-z0-9.-]";"-"))),downloadLocation:"NOASSERTION",filesAnalyzed:false,licenseDeclared:"NOASSERTION",licenseConcluded:"NOASSERTION",copyrightText:"NOASSERTION"}]+[{name:"debian-package-closure",versionInfo:$debian,SPDXID:"SPDXRef-DebianPackageClosure",downloadLocation:"NOASSERTION",filesAnalyzed:false,licenseDeclared:"NOASSERTION",licenseConcluded:"NOASSERTION",copyrightText:"NOASSERTION",comment:"Exact package versions and artifact hashes are retained in debian-package-closure.manifest."},{name:"diy-device-os-bootstrap",versionInfo:$revision,SPDXID:"SPDXRef-DIYDeviceOSBootstrap",downloadLocation:$source_archive,filesAnalyzed:false,licenseDeclared:"GPL-3.0-only",licenseConcluded:"GPL-3.0-only",copyrightText:"Copyright (c) 2026 dalsoop"},{name:"technitium-dns-server-container",versionInfo:$technitium,SPDXID:"SPDXRef-Technitium",downloadLocation:"NOASSERTION",filesAnalyzed:false,licenseDeclared:"NOASSERTION",licenseConcluded:"NOASSERTION",copyrightText:"NOASSERTION",comment:"The container combines the GPL-3.0 Technitium DNS Server with separately licensed runtime content; inspect its embedded notices."},{name:"tailscale-linux-static",versionInfo:$tailscale,SPDXID:"SPDXRef-Tailscale",downloadLocation:"NOASSERTION",filesAnalyzed:false,licenseDeclared:"BSD-3-Clause",licenseConcluded:"NOASSERTION",copyrightText:"Copyright (c) 2020 Tailscale Inc & contributors",comment:"The upstream project is BSD-3-Clause; the static binaries include dependencies listed in the pinned Tailscale dependency-license report."},{name:"tailscale-dependency-license-report",versionInfo:$tailscale,SPDXID:"SPDXRef-TailscaleDependencyReport",downloadLocation:"NOASSERTION",filesAnalyzed:false,licenseDeclared:"NOASSERTION",licenseConcluded:"NOASSERTION",copyrightText:"NOASSERTION"}])}' \
+    > "$artifact_dir/sbom.spdx.json"
+sbom_sha256=$(sha256sum "$artifact_dir/sbom.spdx.json" | awk '{print $1}')
+
+component_registry=$artifact_dir/component-redistribution-registry.json
+jq -n \
+    --arg debian_version "$DEBIAN_POINT_RELEASE@$DEBIAN_SNAPSHOT" \
+    --arg closure_sha256 "$closure_sha256" \
+    --arg technitium_version "$TECHNITIUM_VERSION" \
+    --arg technitium_archive_sha256 "$archive_sha256" \
+    --arg technitium_source_identity "$TECHNITIUM_AMD64_DIGEST" \
+    --arg tailscale_version "$TAILSCALE_VERSION" \
+    --arg tailscale_sha256 "$tailscale_sha256" \
+    --arg tailscale_licenses_sha256 "$tailscale_licenses_sha256" \
+    --arg source_revision "$source_revision" \
+    --arg source_snapshot_sha256 "$source_snapshot_sha256" \
+    '{
+      schema_version: 1,
+      artifact_id: "dns-appliance",
+      components: [
+        {id:"debian-package-closure",version:$debian_version,digest:{algorithm:"sha256",value:$closure_sha256},redistribution:{status:"personal-use-only"}},
+        {id:"technitium-oci",version:$technitium_version,digest:{algorithm:"sha256",value:$technitium_archive_sha256},source_identity:{kind:"oci-digest",value:$technitium_source_identity},redistribution:{status:"personal-use-only"}},
+        {id:"tailscale-archive",version:$tailscale_version,digest:{algorithm:"sha256",value:$tailscale_sha256},redistribution:{status:"personal-use-only"}},
+        {id:"tailscale-dependency-report",version:$tailscale_version,digest:{algorithm:"sha256",value:$tailscale_licenses_sha256},redistribution:{status:"personal-use-only"}},
+        {id:"repository-source-snapshot",version:$source_revision,digest:{algorithm:"sha256",value:$source_snapshot_sha256},redistribution:{status:"personal-use-only"}}
+      ]
+    }' > "$component_registry"
+"$distribution_validator" --registry "$component_registry" \
+    --policy "$distribution_policy" >/dev/null
+component_registry_sha256=$(sha256sum "$component_registry" | awk '{print $1}')
+
+install -m 0644 "$generated_dir/source-snapshot.tar.gz" \
+    "$artifact_dir/repository-source-snapshot.tar.gz"
+install -m 0644 "$generated_dir/distribution-status.md" \
+    "$artifact_dir/DISTRIBUTION_STATUS.md"
+install -m 0644 "$distribution_policy" "$artifact_dir/distribution-policy.json"
+
+jq -n \
+    --arg build_id "$build_id" \
+    --arg install_mode "$install_mode" \
+    --arg iso "$(basename "$iso")" \
+    --arg iso_sha256 "$iso_sha256" \
+    --arg debian "$DEBIAN_POINT_RELEASE" \
+    --arg snapshot "$DEBIAN_SNAPSHOT" \
+    --arg technitium "$TECHNITIUM_VERSION" \
+    --arg technitium_digest "$TECHNITIUM_AMD64_DIGEST" \
+    --arg technitium_archive_sha256 "$archive_sha256" \
+    --arg tailscale "$TAILSCALE_VERSION" \
+    --arg tailscale_archive_sha256 "$tailscale_sha256" \
+    --arg source_revision "$source_revision" \
+    --arg source_repository "$source_repository" \
+    --arg source_archive "$source_archive" \
+    --arg component_registry_sha256 "$component_registry_sha256" \
+    --arg distribution_policy_sha256 "$distribution_policy_sha256" \
+    --arg sbom_sha256 "$sbom_sha256" \
+    --slurpfile registry "$component_registry" \
+    '{schema_version:1,artifact_id:"dns-appliance",build_id:$build_id,install_mode:$install_mode,iso:$iso,iso_sha256:$iso_sha256,distribution_status:"personal-use-only",component_registry:"component-redistribution-registry.json",component_registry_sha256:$component_registry_sha256,distribution_policy_sha256:$distribution_policy_sha256,components:($registry[0].components|map({id,status:.redistribution.status})),sbom:"sbom.spdx.json",sbom_sha256:$sbom_sha256,debian_point_release:$debian,debian_snapshot:$snapshot,technitium_version:$technitium,technitium_image_digest:$technitium_digest,technitium_archive_sha256:$technitium_archive_sha256,tailscale_version:$tailscale,tailscale_archive_sha256:$tailscale_archive_sha256,source_revision:$source_revision,source_repository:$source_repository,source_archive:$source_archive}' \
+    > "$artifact_dir/build-manifest.json.tmp"
+mv "$artifact_dir/build-manifest.json.tmp" "$artifact_dir/build-manifest.json"
+
+echo "build manifest: $artifact_dir/build-manifest.json"
+echo "component registry: $component_registry"
+echo "SBOM: $artifact_dir/sbom.spdx.json"

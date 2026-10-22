@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "product": {
+    "name": "DIY Device OS USB",
+    "repository": "https://github.com/dalsoop/diy-device-os-bootstrap"
+  },
+  "catalog": {
+    "kind": "workspace",
+    "path": "engine/catalog",
+    "index": "data/index.json",
+    "bootloader": "ventoy"
+  },
+  "collection": "collections/device-os.json",
+  "local_entries": [
+    "usb-media/local-entries/dns-appliance.json"
+  ],
+  "usb": {
+    "data_label": "DEVICE-OS",
+    "enrollment_label": "DNS-ENROLL",
+    "enrollment_reserve_mib": 2048,
+    "capacity_overhead_mib": 768,
+    "default_language": "ko_KR"
+  },
+  "bundles": [
+    {
+      "id": "dns-appliance-status-monitor",
+      "destination": "tools/dns-appliance-status-monitor",
+      "source": {
+        "kind": "repository-tree",
+        "path": "management/dns-appliance-status-monitor"
+      }
+    },
+    {
+      "id": "dns-inventory-capture",
+      "destination": "tools/capture-inventory",
+      "source": {
+        "kind": "repository-file",
+        "path": "dns-image/capture-inventory"
+      }
+    },
+    {
+      "id": "dns-disk-identity",
+      "destination": "tools/disk-identity",
+      "source": {
+        "kind": "repository-file",
+        "path": "dns-image/disk-identity"
+      }
+    },
+    {
+      "id": "dns-inventory-wizard",
+      "destination": "tools/dns-inventory",
+      "source": {
+        "kind": "repository-file",
+        "path": "dns-image/inventory-wizard"
+      }
+    },
+    {
+      "id": "dns-inventory-guide",
+      "destination": "guides/DNS_INVENTORY.md",
+      "source": {
+        "kind": "repository-file",
+        "path": "usb-media/guides/dns-inventory.md"
+      }
+    },
+    {
+      "id": "dns-install-guide",
+      "destination": "guides/DNS_INSTALL.md",
+      "source": {
+        "kind": "repository-file",
+        "path": "usb-media/guides/dns-install.md"
+      }
+    }
+  ]
+}

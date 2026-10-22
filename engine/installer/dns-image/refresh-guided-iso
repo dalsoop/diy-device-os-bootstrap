@@ -1,0 +1,102 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+
+fail() {
+    echo "refresh-guided-iso: $*" >&2
+    exit 1
+}
+
+[ "$#" -eq 2 ] || fail "usage: refresh-guided-iso BASE.iso OUTPUT.iso"
+base_iso=$(CDPATH='' cd -- "$(dirname -- "$1")" && pwd)/$(basename -- "$1")
+if [ ! -f "$base_iso" ] || [ ! -r "$base_iso" ]; then
+    fail "base ISO is not readable"
+fi
+[ -d "$(dirname -- "$2")" ] || mkdir -p "$(dirname -- "$2")"
+output_iso=$(CDPATH='' cd -- "$(dirname -- "$2")" && pwd)/$(basename -- "$2")
+[ "$base_iso" != "$output_iso" ] || fail "output must not replace the base ISO"
+[ ! -e "$output_iso" ] || fail "output already exists: $output_iso"
+command -v xorriso >/dev/null 2>&1 || fail "xorriso is required"
+command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
+
+temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/dns-guided-refresh.XXXXXX")
+temporary_iso=$temporary_dir/candidate.iso
+cleanup() {
+    rm -rf "$temporary_dir"
+}
+trap cleanup EXIT HUP INT TERM
+
+extract_base() {
+    xorriso -osirrox on -indev "$base_iso" \
+        -extract "/simple-cdd/$1" "$temporary_dir/$1" \
+        >/dev/null 2>&1 || fail "base ISO is missing /simple-cdd/$1"
+}
+
+extract_base install-mode
+[ "$(cat "$temporary_dir/install-mode")" = guided ] ||
+    fail "base ISO is not a guided installer image"
+
+for source in \
+    "$script_dir/scripts/install-gate" \
+    "$script_dir/scripts/prepare-installer" \
+    "$script_dir/disk-identity" \
+    "$script_dir/scripts/guided.templates" \
+    "$script_dir/simple-cdd/profiles/default.preseed"; do
+    [ -r "$source" ] || fail "missing refresh source: $source"
+done
+
+mkdir -p "$(dirname -- "$output_iso")"
+xorriso -indev "$base_iso" -outdev "$temporary_iso" \
+    -boot_image any replay \
+    -map "$script_dir/scripts/install-gate" /simple-cdd/install-gate \
+    -map "$script_dir/scripts/prepare-installer" /simple-cdd/prepare-installer \
+    -map "$script_dir/disk-identity" /simple-cdd/disk-identity \
+    -map "$script_dir/scripts/guided.templates" /simple-cdd/guided.templates \
+    -map "$script_dir/simple-cdd/profiles/default.preseed" /simple-cdd/default.preseed \
+    -commit >/dev/null || fail "xorriso could not refresh the guided installer files"
+
+verify_dir=$temporary_dir/verify
+mkdir -p "$verify_dir"
+for item in \
+    install-gate \
+    prepare-installer \
+    disk-identity \
+    guided.templates \
+    default.preseed; do
+    case "$item" in
+        install-gate) source="$script_dir/scripts/install-gate" ;;
+        prepare-installer) source="$script_dir/scripts/prepare-installer" ;;
+        disk-identity) source="$script_dir/disk-identity" ;;
+        guided.templates) source="$script_dir/scripts/guided.templates" ;;
+        default.preseed) source="$script_dir/simple-cdd/profiles/default.preseed" ;;
+    esac
+    xorriso -osirrox on -indev "$temporary_iso" \
+        -extract "/simple-cdd/$item" "$verify_dir/$item" \
+        >/dev/null 2>&1 || fail "refreshed ISO is missing /simple-cdd/$item"
+    cmp -s "$source" "$verify_dir/$item" || fail "refreshed ISO has stale $item"
+done
+xorriso -osirrox on -indev "$temporary_iso" \
+    -extract /boot/grub/grub.cfg "$verify_dir/grub.cfg" \
+    >/dev/null 2>&1 || fail "refreshed ISO is missing its UEFI menu"
+xorriso -osirrox on -indev "$temporary_iso" -extract /isolinux \
+    "$verify_dir/isolinux" >/dev/null 2>&1 || fail "refreshed ISO is missing its BIOS menu"
+awk '
+    /^[[:space:]]*set[[:space:]]+timeout=/ &&
+        $0 !~ /^[[:space:]]*set[[:space:]]+timeout=-1[[:space:]]*$/ {bad=1}
+    END {exit bad ? 1 : 0}
+' "$verify_dir/grub.cfg" || fail "refreshed ISO enables automatic UEFI boot"
+awk '
+    toupper($1) == "TIMEOUT" && $2 != "0" {bad=1}
+    END {exit bad ? 1 : 0}
+' "$verify_dir"/isolinux/*.cfg || fail "refreshed ISO enables automatic BIOS boot"
+"$script_dir/check-installer-glyphs" --iso "$temporary_iso" ||
+    fail "the installer font of the refreshed ISO cannot draw guided.templates"
+
+mv "$temporary_iso" "$output_iso"
+printf 'candidate ISO: %s\n' "$output_iso"
+printf 'candidate SHA-256: '
+sha256sum "$output_iso"
+echo 'No production build manifest was created; this candidate is for disposable VM iteration only.'

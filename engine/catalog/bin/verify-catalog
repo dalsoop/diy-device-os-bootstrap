@@ -1,0 +1,264 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+default_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+repo_root=${DEVICE_MEDIA_CATALOG_ROOT:-$default_root}
+index=$repo_root/data/index.json
+
+fail() {
+    echo "DIY Device OS Catalog: $*" >&2
+    exit 1
+}
+
+command -v jq >/dev/null 2>&1 || fail "jq is required"
+[ -r "$index" ] || fail "data/index.json is missing"
+
+jq -e '
+  def safe_id: type == "string" and test("^[a-z0-9][a-z0-9-]*$");
+  def safe_rel:
+    type == "string" and
+    test("^[A-Za-z0-9][A-Za-z0-9._+!/-]*$") and
+    (startswith("/") | not) and
+    (split("/") | all(. != "" and . != "." and . != ".."));
+  .schema_version == 1 and
+  .name == "DIY Device OS Catalog" and
+  .repository == "https://github.com/dalsoop/diy-device-os-bootstrap" and
+  (.bootloaders | type == "array" and length > 0) and
+  (.entries | type == "array" and length > 0) and
+  (all(.bootloaders[]; (.id | safe_id) and (.path | safe_rel) and (.path | startswith("data/bootloaders/")))) and
+  (all(.entries[]; (.id | safe_id) and (.path | safe_rel) and (.path | startswith("data/entries/")))) and
+  (([.bootloaders[].id] | length) == ([.bootloaders[].id] | unique | length)) and
+  (([.bootloaders[].path] | length) == ([.bootloaders[].path] | unique | length)) and
+  (([.entries[].id] | length) == ([.entries[].id] | unique | length)) and
+  (([.entries[].path] | length) == ([.entries[].path] | unique | length))
+' "$index" >/dev/null || fail "catalog index contract is invalid"
+
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+
+jq -r '.entries[].path' "$index" | LC_ALL=C sort > "$temporary/indexed-entries"
+find "$repo_root/data/entries" -type f -name '*.json' |
+    sed "s|^$repo_root/||" | LC_ALL=C sort > "$temporary/actual-entries"
+cmp -s "$temporary/indexed-entries" "$temporary/actual-entries" ||
+    fail "catalog entries and index references differ"
+
+jq -r '.bootloaders[].path' "$index" | LC_ALL=C sort > "$temporary/indexed-bootloaders"
+find "$repo_root/data/bootloaders" -type f -name '*.json' |
+    sed "s|^$repo_root/||" | LC_ALL=C sort > "$temporary/actual-bootloaders"
+cmp -s "$temporary/indexed-bootloaders" "$temporary/actual-bootloaders" ||
+    fail "bootloaders and index references differ"
+
+tab=$(printf '\t')
+jq -r '.entries[] | [.id, .path] | @tsv' "$index" |
+while IFS="$tab" read -r expected_id path; do
+    file=$repo_root/$path
+    [ -r "$file" ] || fail "entry is not readable: $path"
+    jq -e --arg expected_id "$expected_id" '
+      def only_keys($allowed):
+        type == "object" and ((keys_unsorted - $allowed) | length == 0);
+      def safe_id: type == "string" and test("^[a-z0-9][a-z0-9-]*$");
+      def safe_rel:
+        type == "string" and
+        test("^[A-Za-z0-9][A-Za-z0-9._+!/-]*$") and
+        (startswith("/") | not) and
+        (split("/") | all(. != "" and . != "." and . != ".."));
+      def digest: type == "string" and test("^[a-f0-9]{64}$");
+      def https_url: type == "string" and startswith("https://");
+      def review_date: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
+      def evidence_kind:
+        . == "license" or . == "notices" or
+        . == "corresponding-source" or . == "trademark";
+      def obligation_kind:
+        . == "license-text" or . == "notices" or
+        . == "corresponding-source" or . == "trademark";
+      def valid_evidence:
+        type == "array" and length >= 4 and
+        all(.[];
+          only_keys(["kind", "url"]) and
+          (.kind | evidence_kind) and
+          (.url | https_url)
+        ) and
+        ([.[].kind] |
+          index("license") != null and
+          index("notices") != null and
+          index("corresponding-source") != null and
+          index("trademark") != null
+        );
+      def valid_location($scope):
+        only_keys(["scope", "path", "sha256"]) and
+        .scope == $scope and
+        (.path | safe_rel) and
+        (.sha256 | digest);
+      def valid_obligation:
+        type == "object" and
+        (.kind | obligation_kind) and
+        if .disposition == "embedded-artifact" then
+          only_keys(["kind", "disposition", "location"]) and
+          (.location | valid_location("artifact"))
+        elif .disposition == "bundle-file" then
+          only_keys(["kind", "disposition", "location"]) and
+          (.location | valid_location("release-bundle"))
+        elif .disposition == "not-required" then
+          only_keys(["kind", "disposition"])
+        else
+          false
+        end;
+      def valid_obligations:
+        type == "array" and length == 4 and
+        all(.[]; valid_obligation) and
+        ([.[].kind] |
+          (map(select(. == "license-text")) | length) == 1 and
+          (map(select(. == "notices")) | length) == 1 and
+          (map(select(. == "corresponding-source")) | length) == 1 and
+          (map(select(. == "trademark")) | length) == 1
+        );
+      def valid_redistribution($version; $url; $sha256):
+        type == "object" and
+        if .status == "personal-use-only" then
+          only_keys(["status"])
+        elif .status == "redistribution-reviewed" then
+          only_keys([
+            "status", "artifact_version", "artifact_url", "artifact_sha256",
+            "reviewed_at", "reviewer", "evidence", "obligations"
+          ]) and
+          .artifact_version == $version and
+          .artifact_url == $url and (.artifact_url | https_url) and
+          .artifact_sha256 == $sha256 and (.artifact_sha256 | digest) and
+          (.reviewed_at | review_date) and
+          (.reviewer | type == "string" and length > 0) and
+          (.evidence | valid_evidence) and
+          (.obligations | valid_obligations)
+        else
+          false
+        end;
+      . as $record |
+      only_keys([
+        "schema_version", "id", "group", "version", "architecture",
+        "destination", "menu_alias", "description_ko", "description_en",
+        "boot_behavior", "profile_adapter", "source", "redistribution"
+      ]) and
+      .schema_version == 2 and .id == $expected_id and (.id | safe_id) and
+      (.group | safe_id) and (.version | type == "string" and length > 0) and
+      ((has("architecture") | not) or (.architecture | type == "string" and length > 0)) and
+      (.destination | safe_rel) and (.destination | test("^images/.+\\.iso$")) and
+      (.menu_alias | type == "string" and length > 0) and
+      (.description_ko | type == "string" and length > 0) and
+      (.description_en | type == "string" and length > 0) and
+      (.boot_behavior == "interactive-installer" or .boot_behavior == "live-environment") and
+      .profile_adapter == "none" and
+      (.source | only_keys(["kind", "filename", "url", "sha256"])) and
+      .source.kind == "locked-download" and
+      (.source.filename | safe_rel) and (.source.filename | contains("/") | not) and
+      (.source.url | https_url) and
+      (.source.sha256 | digest) and
+      (.redistribution | valid_redistribution($record.version; $record.source.url; $record.source.sha256))
+    ' "$file" >/dev/null || fail "entry contract is invalid: $path"
+    jq -r '.source.filename' "$file"
+done > "$temporary/source-filenames"
+
+[ "$(wc -l < "$temporary/source-filenames" | tr -d ' ')" = "$(LC_ALL=C sort -u "$temporary/source-filenames" | wc -l | tr -d ' ')" ] ||
+    fail "entry source filenames must be unique"
+
+jq -r '.bootloaders[] | [.id, .path] | @tsv' "$index" |
+while IFS="$tab" read -r expected_id path; do
+    file=$repo_root/$path
+    [ -r "$file" ] || fail "bootloader is not readable: $path"
+    jq -e --arg expected_id "$expected_id" '
+      def only_keys($allowed):
+        type == "object" and ((keys_unsorted - $allowed) | length == 0);
+      def safe_id: type == "string" and test("^[a-z0-9][a-z0-9-]*$");
+      def safe_rel:
+        type == "string" and
+        test("^[A-Za-z0-9][A-Za-z0-9._+!/-]*$") and
+        (startswith("/") | not) and
+        (split("/") | all(. != "" and . != "." and . != ".."));
+      def digest: type == "string" and test("^[a-f0-9]{64}$");
+      def https_url: type == "string" and startswith("https://");
+      def review_date: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
+      def evidence_kind:
+        . == "license" or . == "notices" or
+        . == "corresponding-source" or . == "trademark";
+      def obligation_kind:
+        . == "license-text" or . == "notices" or
+        . == "corresponding-source" or . == "trademark";
+      def valid_evidence:
+        type == "array" and length >= 4 and
+        all(.[];
+          only_keys(["kind", "url"]) and
+          (.kind | evidence_kind) and
+          (.url | https_url)
+        ) and
+        ([.[].kind] |
+          index("license") != null and
+          index("notices") != null and
+          index("corresponding-source") != null and
+          index("trademark") != null
+        );
+      def valid_location($scope):
+        only_keys(["scope", "path", "sha256"]) and
+        .scope == $scope and
+        (.path | safe_rel) and
+        (.sha256 | digest);
+      def valid_obligation:
+        type == "object" and
+        (.kind | obligation_kind) and
+        if .disposition == "embedded-artifact" then
+          only_keys(["kind", "disposition", "location"]) and
+          (.location | valid_location("artifact"))
+        elif .disposition == "bundle-file" then
+          only_keys(["kind", "disposition", "location"]) and
+          (.location | valid_location("release-bundle"))
+        elif .disposition == "not-required" then
+          only_keys(["kind", "disposition"])
+        else
+          false
+        end;
+      def valid_obligations:
+        type == "array" and length == 4 and
+        all(.[]; valid_obligation) and
+        ([.[].kind] |
+          (map(select(. == "license-text")) | length) == 1 and
+          (map(select(. == "notices")) | length) == 1 and
+          (map(select(. == "corresponding-source")) | length) == 1 and
+          (map(select(. == "trademark")) | length) == 1
+        );
+      def valid_redistribution($version; $url; $sha256):
+        type == "object" and
+        if .status == "personal-use-only" then
+          only_keys(["status"])
+        elif .status == "redistribution-reviewed" then
+          only_keys([
+            "status", "artifact_version", "artifact_url", "artifact_sha256",
+            "reviewed_at", "reviewer", "evidence", "obligations"
+          ]) and
+          .artifact_version == $version and
+          .artifact_url == $url and (.artifact_url | https_url) and
+          .artifact_sha256 == $sha256 and (.artifact_sha256 | digest) and
+          (.reviewed_at | review_date) and
+          (.reviewer | type == "string" and length > 0) and
+          (.evidence | valid_evidence) and
+          (.obligations | valid_obligations)
+        else
+          false
+        end;
+      . as $record |
+      only_keys([
+        "schema_version", "id", "implementation", "version", "archive_root",
+        "source", "redistribution"
+      ]) and
+      .schema_version == 2 and .id == $expected_id and (.id | safe_id) and
+      (.implementation | safe_id) and (.version | type == "string" and length > 0) and
+      (.archive_root | safe_rel) and
+      (.source | only_keys(["kind", "filename", "url", "sha256"])) and
+      .source.kind == "locked-download" and
+      (.source.filename | safe_rel) and (.source.filename | contains("/") | not) and
+      (.source.url | https_url) and
+      (.source.sha256 | digest) and
+      (.redistribution | valid_redistribution($record.version; $record.source.url; $record.source.sha256))
+    ' "$file" >/dev/null || fail "bootloader contract is invalid: $path"
+done
+
+echo "DIY Device OS Catalog: valid"

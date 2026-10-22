@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dalsoop/diy-device-os-bootstrap/blob/main/engine/catalog/schemas/media-entry.schema.json",
+  "title": "Device OS Entry",
+  "type": "object",
+  "required": ["schema_version", "id", "group", "version", "destination", "menu_alias", "description_ko", "description_en", "boot_behavior", "profile_adapter", "source", "redistribution"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "id": { "$ref": "#/$defs/id" },
+    "group": { "$ref": "#/$defs/id" },
+    "version": { "type": "string", "minLength": 1 },
+    "architecture": { "type": "string", "minLength": 1 },
+    "destination": {
+      "allOf": [
+        { "$ref": "#/$defs/safeRelativePath" },
+        { "pattern": "^images/.+\\.iso$" }
+      ]
+    },
+    "menu_alias": { "type": "string", "minLength": 1 },
+    "description_ko": { "type": "string", "minLength": 1 },
+    "description_en": { "type": "string", "minLength": 1 },
+    "boot_behavior": { "enum": ["interactive-installer", "live-environment"] },
+    "profile_adapter": { "const": "none" },
+    "source": { "$ref": "#/$defs/source" },
+    "redistribution": { "$ref": "#/$defs/redistribution" }
+  },
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "redistribution": { "$ref": "#/$defs/personalUseOnly" }
+      }
+    },
+    { "$ref": "#/$defs/reviewedArtifactTuples" }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "httpsUrl": {
+      "type": "string",
+      "pattern": "^https://"
+    },
+    "safeRelativePath": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9](?:[A-Za-z0-9._+!/-]*[A-Za-z0-9._+!-])?$"
+    },
+    "source": {
+      "type": "object",
+      "required": ["kind", "filename", "url", "sha256"],
+      "properties": {
+        "kind": { "const": "locked-download" },
+        "filename": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+!-]*$"
+        },
+        "url": { "$ref": "#/$defs/httpsUrl" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "redistribution": {
+      "oneOf": [
+        { "$ref": "#/$defs/personalUseOnly" },
+        { "$ref": "#/$defs/redistributionReviewed" }
+      ]
+    },
+    "reviewedArtifactTuples": {
+      "oneOf": [
+        {
+          "properties": {
+            "id": { "const": "debian-live" },
+            "version": { "const": "13.7.0" },
+            "source": {
+              "properties": {
+                "url": { "const": "https://cdimage.debian.org/debian-cd/13.7.0-live/amd64/iso-hybrid/debian-live-13.7.0-amd64-standard.iso" },
+                "sha256": { "const": "040a44f35186321eb6cdaab52a8a2d06224fe6b77f6fbb9f1861ad89c14e17ec" }
+              }
+            },
+            "redistribution": {
+              "properties": {
+                "status": { "const": "redistribution-reviewed" },
+                "artifact_version": { "const": "13.7.0" },
+                "artifact_url": { "const": "https://cdimage.debian.org/debian-cd/13.7.0-live/amd64/iso-hybrid/debian-live-13.7.0-amd64-standard.iso" },
+                "artifact_sha256": { "const": "040a44f35186321eb6cdaab52a8a2d06224fe6b77f6fbb9f1861ad89c14e17ec" }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "id": { "const": "pop-os" },
+            "version": { "const": "24.04-build-28" },
+            "source": {
+              "properties": {
+                "url": { "const": "https://iso.pop-os.org/24.04/amd64/generic/28/pop-os_24.04_amd64_generic_28.iso" },
+                "sha256": { "const": "8d78e500fc95da765a91cddcf2ab7ba71ce4e7997e4f008456d4d872ee8f8221" }
+              }
+            },
+            "redistribution": {
+              "properties": {
+                "status": { "const": "redistribution-reviewed" },
+                "artifact_version": { "const": "24.04-build-28" },
+                "artifact_url": { "const": "https://iso.pop-os.org/24.04/amd64/generic/28/pop-os_24.04_amd64_generic_28.iso" },
+                "artifact_sha256": { "const": "8d78e500fc95da765a91cddcf2ab7ba71ce4e7997e4f008456d4d872ee8f8221" }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "id": { "const": "proxmox-backup-server" },
+            "version": { "const": "4.2-1" },
+            "source": {
+              "properties": {
+                "url": { "const": "https://enterprise.proxmox.com/iso/proxmox-backup-server_4.2-1.iso" },
+                "sha256": { "const": "2fb299deac3929253712c9c3dfc9237edbe70af83c8848467616b771a1d5453e" }
+              }
+            },
+            "redistribution": {
+              "properties": {
+                "status": { "const": "redistribution-reviewed" },
+                "artifact_version": { "const": "4.2-1" },
+                "artifact_url": { "const": "https://enterprise.proxmox.com/iso/proxmox-backup-server_4.2-1.iso" },
+                "artifact_sha256": { "const": "2fb299deac3929253712c9c3dfc9237edbe70af83c8848467616b771a1d5453e" }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "id": { "const": "proxmox-ve" },
+            "version": { "const": "9.2-1" },
+            "source": {
+              "properties": {
+                "url": { "const": "https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso" },
+                "sha256": { "const": "4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c" }
+              }
+            },
+            "redistribution": {
+              "properties": {
+                "status": { "const": "redistribution-reviewed" },
+                "artifact_version": { "const": "9.2-1" },
+                "artifact_url": { "const": "https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso" },
+                "artifact_sha256": { "const": "4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c" }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "id": { "const": "truenas-scale" },
+            "version": { "const": "25.10.7" },
+            "source": {
+              "properties": {
+                "url": { "const": "https://download.truenas.com/TrueNAS-SCALE-Goldeye/25.10.7/TrueNAS-SCALE-25.10.7.iso" },
+                "sha256": { "const": "54ce9441ce66966a392e28f63604ca3c2c083d0bec4db7bb5af2f74f7a007c8e" }
+              }
+            },
+            "redistribution": {
+              "properties": {
+                "status": { "const": "redistribution-reviewed" },
+                "artifact_version": { "const": "25.10.7" },
+                "artifact_url": { "const": "https://download.truenas.com/TrueNAS-SCALE-Goldeye/25.10.7/TrueNAS-SCALE-25.10.7.iso" },
+                "artifact_sha256": { "const": "54ce9441ce66966a392e28f63604ca3c2c083d0bec4db7bb5af2f74f7a007c8e" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "personalUseOnly": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "const": "personal-use-only" }
+      },
+      "additionalProperties": false
+    },
+    "redistributionReviewed": {
+      "type": "object",
+      "required": ["status", "artifact_version", "artifact_url", "artifact_sha256", "reviewed_at", "reviewer", "evidence", "obligations"],
+      "properties": {
+        "status": { "const": "redistribution-reviewed" },
+        "artifact_version": { "type": "string", "minLength": 1 },
+        "artifact_url": { "$ref": "#/$defs/httpsUrl" },
+        "artifact_sha256": { "$ref": "#/$defs/sha256" },
+        "reviewed_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "reviewer": { "type": "string", "minLength": 1 },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "obligations": { "$ref": "#/$defs/obligations" }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["kind", "url"],
+        "properties": {
+          "kind": { "enum": ["license", "notices", "corresponding-source", "trademark"] },
+          "url": { "$ref": "#/$defs/httpsUrl" }
+        },
+        "additionalProperties": false
+      },
+      "allOf": [
+        { "contains": { "type": "object", "properties": { "kind": { "const": "license" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "notices" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "corresponding-source" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "trademark" } }, "required": ["kind"] } }
+      ]
+    },
+    "obligations": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/obligation" },
+      "allOf": [
+        { "contains": { "type": "object", "properties": { "kind": { "const": "license-text" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "notices" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "corresponding-source" } }, "required": ["kind"] } },
+        { "contains": { "type": "object", "properties": { "kind": { "const": "trademark" } }, "required": ["kind"] } }
+      ]
+    },
+    "obligation": {
+      "oneOf": [
+        { "$ref": "#/$defs/embeddedObligation" },
+        { "$ref": "#/$defs/bundleObligation" },
+        { "$ref": "#/$defs/notRequiredObligation" }
+      ]
+    },
+    "embeddedObligation": {
+      "type": "object",
+      "required": ["kind", "disposition", "location"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/obligationKind" },
+        "disposition": { "const": "embedded-artifact" },
+        "location": {
+          "allOf": [
+            { "$ref": "#/$defs/location" },
+            { "properties": { "scope": { "const": "artifact" } } }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "bundleObligation": {
+      "type": "object",
+      "required": ["kind", "disposition", "location"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/obligationKind" },
+        "disposition": { "const": "bundle-file" },
+        "location": {
+          "allOf": [
+            { "$ref": "#/$defs/location" },
+            { "properties": { "scope": { "const": "release-bundle" } } }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "notRequiredObligation": {
+      "type": "object",
+      "required": ["kind", "disposition"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/obligationKind" },
+        "disposition": { "const": "not-required" }
+      },
+      "additionalProperties": false
+    },
+    "obligationKind": {
+      "enum": ["license-text", "notices", "corresponding-source", "trademark"]
+    },
+    "location": {
+      "type": "object",
+      "required": ["scope", "path", "sha256"],
+      "properties": {
+        "scope": { "enum": ["artifact", "release-bundle"] },
+        "path": { "$ref": "#/$defs/safeRelativePath" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

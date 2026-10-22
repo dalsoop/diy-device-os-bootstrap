@@ -1,0 +1,38 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Build-stage gate for a freshly built Simple-CDD ISO. Runs the installer
+# target-package check and the installer glyph check; if either fails, the
+# ISO and any build manifest, SBOM or checksum list beside it are deleted so
+# no rejected image can be published or paired with a manifest.
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+
+fail() {
+    echo "gate-built-iso: $*" >&2
+    exit 1
+}
+
+[ "$#" -eq 3 ] || fail "usage: gate-built-iso ISO DEBIAN-PACKAGES.txt ARTIFACT-DIR"
+iso=$1
+packages=$2
+artifact_dir=$3
+[ -d "$artifact_dir" ] || fail "artifact directory does not exist: $artifact_dir"
+
+rejected=false
+"$script_dir/check-installer-closure" "$packages" || rejected=true
+if [ -f "$iso" ]; then
+    "$script_dir/check-installer-glyphs" --iso "$iso" || rejected=true
+else
+    echo "gate-built-iso: built ISO is missing: $iso" >&2
+    rejected=true
+fi
+
+if [ "$rejected" = true ]; then
+    rm -f "$iso" "$artifact_dir/build-manifest.json" "$artifact_dir/sbom.spdx.json" \
+        "$artifact_dir/SHA256SUMS"
+    fail "rejected $iso; deleted it and wrote no build manifest"
+fi
+echo "gate-built-iso: installer package closure and glyph checks passed"

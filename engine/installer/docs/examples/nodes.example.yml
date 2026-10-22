@@ -1,0 +1,48 @@
+# Documentation-only topology view. The installer consumes the ignored
+# burn-history/os-installs/<role>/hardware.conf files for dns01, dns02, and dns03.
+---
+network:
+  cidr: 10.0.0.0/16
+  prefix_length: 16
+  gateway: 10.0.0.1
+  domain: home.arpa
+  management_cidr: 10.0.0.0/24
+  cluster_domain: dns-cluster.home.arpa
+
+nodes:
+  dns01:
+    address: 10.0.5.1
+    cluster_role: primary
+    expected_product_name_sha256: REPLACE_WITH_CAPTURE
+    expected_product_sku_sha256: REPLACE_WITH_CAPTURE
+    expected_system_serial_sha256: REPLACE_WITH_CAPTURE
+    expected_system_uuid_sha256: REPLACE_WITH_CAPTURE
+    expected_mac_sha256: REPLACE_WITH_CAPTURE
+    expected_disk_model_sha256: REPLACE_WITH_CAPTURE
+    expected_disk_serial_sha256: REPLACE_WITH_CAPTURE
+    expected_disk_min_bytes: 0
+    destructive_install_enabled: false
+  dns02:
+    address: 10.0.5.2
+    cluster_role: secondary
+    expected_product_name_sha256: REPLACE_WITH_CAPTURE
+    expected_product_sku_sha256: REPLACE_WITH_CAPTURE
+    expected_system_serial_sha256: REPLACE_WITH_CAPTURE
+    expected_system_uuid_sha256: REPLACE_WITH_CAPTURE
+    expected_mac_sha256: REPLACE_WITH_CAPTURE
+    expected_disk_model_sha256: REPLACE_WITH_CAPTURE
+    expected_disk_serial_sha256: REPLACE_WITH_CAPTURE
+    expected_disk_min_bytes: 0
+    destructive_install_enabled: false
+  dns03:
+    address: 10.0.5.3
+    cluster_role: secondary
+    expected_product_name_sha256: REPLACE_WITH_CAPTURE
+    expected_product_sku_sha256: REPLACE_WITH_CAPTURE
+    expected_system_serial_sha256: REPLACE_WITH_CAPTURE
+    expected_system_uuid_sha256: REPLACE_WITH_CAPTURE
+    expected_mac_sha256: REPLACE_WITH_CAPTURE
+    expected_disk_model_sha256: REPLACE_WITH_CAPTURE
+    expected_disk_serial_sha256: REPLACE_WITH_CAPTURE
+    expected_disk_min_bytes: 0
+    destructive_install_enabled: false

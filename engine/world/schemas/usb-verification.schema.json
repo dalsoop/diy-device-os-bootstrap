@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dalsoop/diy-device-os-bootstrap/blob/main/engine/world/schemas/usb-verification.schema.json",
+  "title": "Verified USB write evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "writer",
+    "target",
+    "preflight_at",
+    "completed_at",
+    "readback",
+    "event_id",
+    "generation_id",
+    "repository_revision",
+    "catalog_tree"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "writer": { "enum": ["linux-ventoy", "macos-mbr-last"] },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display_name", "bytes"],
+      "properties": {
+        "display_name": { "type": "string", "minLength": 1 },
+        "bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "preflight_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "status"],
+      "properties": {
+        "method": { "type": "string", "minLength": 1 },
+        "status": { "const": "passed" }
+      }
+    },
+    "event_id": { "type": "string", "pattern": "^[0-9]{14}-[a-z0-9-]+-[0-9a-f]{8}$" },
+    "generation_id": { "type": "string", "pattern": "^[0-9]{14}-[a-z0-9-]+$" },
+    "repository_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "catalog_tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+  }
+}

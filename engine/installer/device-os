@@ -1,0 +1,325 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+monorepo_root=$(CDPATH='' cd -- "$repo_root/../.." && pwd)
+composition=$repo_root/usb-media/composition.json
+collection=$(jq -er '.collection' "$composition")
+collection=$repo_root/$collection
+resolved=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
+world_plan=${DEVICE_OS_WORLD_PLAN:-$repo_root/work/device-os/world.json}
+event_recorder=$monorepo_root/engine/world/bin/record-usb-event
+
+usage() {
+    cat <<'EOF'
+DIY Device OS Bootstrap
+
+Usage:
+  ./device-os license check --mode personal-use [--json]
+  ./device-os license check --mode source-release [--json]
+  ./device-os license check --mode prebuilt-release --catalog ABS \
+    --artifact id=ABS --manifest id=ABS --review id=ABS --release-root ABS [--json]
+  ./device-os world validate             Validate the selected World and media
+  ./device-os world available            List Catalog entries and World selection
+  ./device-os world plan                 Show World-selected USB contents
+  ./device-os world capacity [options]   Check a size or physical device
+  ./device-os world simulate             Run without downloads or disk writes
+  ./device-os world readiness            Report DNS build and media blockers
+  ./device-os world prepare              Download and verify World-selected images
+  ./device-os world build-image <options>
+                                        Build an exact-size raw USB image
+  sudo ./device-os world burn <options>  Burn a verified removable USB on Linux
+  sudo ./device-os world burn-image-macos <options>
+                                        Burn a World image on macOS and record it
+
+Reference/contributor commands:
+  ./device-os targets                    List live removable targets and confirmations
+  ./device-os available                 List available catalog entries
+  ./device-os include <id>              Add an entry to the reference collection
+  ./device-os exclude <id>              Remove an entry from the reference collection
+  ./device-os plan                       Show contents and safety policy
+  ./device-os capacity [options]         Check a size or physical device
+  ./device-os simulate                   Run without downloads or disk writes
+  ./device-os prepare                    Download and verify selected images
+  ./device-os build-image <options>      Build an exact-size raw USB image
+  sudo ./device-os burn <options>        Burn a verified removable USB on Linux
+  sudo ./device-os burn-image-macos <options>
+                                        Burn and verify a full-disk image on macOS
+
+The burner delegates to the verified media writers. Burning erases the selected
+USB and requires the exact target-specific --confirm phrase.
+
+macOS example:
+  sudo ./device-os world burn-image-macos \
+    --image /absolute/path/device-os.raw \
+    --device /dev/disk5 \
+    --confirm 'ERASE /dev/disk5 SanDisk 3.2Gen1 USB_SERIAL 30784094208'
+
+Capacity examples:
+  ./device-os world capacity
+  ./device-os world capacity --capacity 16GB
+  ./device-os world capacity --capacity 16GB \
+    --runtime-artifact dns-appliance=/absolute/path/dns-appliance.iso \
+    --runtime-manifest dns-appliance=/absolute/path/build-manifest.json
+
+Select a non-default World media definition with DEVICE_OS_MEDIA, for example:
+  DEVICE_OS_MEDIA=inventory-capture ./device-os world plan
+EOF
+}
+
+fail() {
+    echo "DIY Device OS Bootstrap: $*" >&2
+    exit 1
+}
+
+option_value() {
+    option_name=$1
+    shift
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = "$option_name" ]; then
+            [ "$#" -ge 2 ] || return 1
+            printf '%s\n' "$2"
+            return 0
+        fi
+        shift
+    done
+    return 1
+}
+
+command -v jq >/dev/null 2>&1 || fail "jq is required"
+
+resolve() {
+    "$repo_root/usb-media/resolve-catalog" >/dev/null
+}
+
+resolve_world_plan() {
+    command -v ruby >/dev/null 2>&1 || fail "ruby is required for World commands"
+    set -- --output "$world_plan"
+    if [ -n "${DEVICE_OS_WORLD:-}" ]; then
+        set -- "$@" --world "$DEVICE_OS_WORLD"
+    fi
+    if [ -n "${DEVICE_OS_MEDIA:-}" ]; then
+        set -- "$@" --media "$DEVICE_OS_MEDIA"
+    fi
+    "$monorepo_root/engine/world/bin/resolve-world" "$@"
+}
+
+resolve_world() {
+    resolve_world_plan
+    DEVICE_MEDIA_WORLD_PLAN=$world_plan "$repo_root/usb-media/resolve-catalog" >/dev/null
+}
+
+print_plan() {
+    echo "DIY Device OS USB contents"
+    echo
+    jq -r '.entries[] |
+      "- [" +
+      (if .boot_behavior == "guarded-unattended" then "guarded unattended"
+       elif .boot_behavior == "interactive-installer" then "interactive installer"
+       else "live environment" end) +
+      "] " + .menu_alias' "$resolved"
+    echo
+    if jq -e 'has("world")' "$resolved" >/dev/null; then
+        echo "World: $(jq -r '.world.world.name + " (" + .world.world.slug + ")"' "$resolved")"
+        echo "Media definition: $(jq -r '.world.media.id' "$resolved")"
+    else
+        echo "Selection: Installer reference collection"
+    fi
+    echo "USB label: $(jq -r '.usb.data_label' "$resolved")"
+    echo "Default boot-menu language: $(jq -r '.usb.default_language' "$resolved")"
+    echo "Monorepo commit: $(jq -r '.catalog.revision' "$resolved")"
+    echo "Catalog tree: $(jq -r '.catalog.tree' "$resolved")"
+    echo "Automatic menu timeout: disabled"
+    if jq -e '.entries[] | select(.profile_adapter == "dns-appliance")' "$resolved" >/dev/null; then
+        echo "DNS install gate: HP inventory, reinstall authorization, and internal disk must match"
+        echo "DNS enrollment partition: $(jq -r '.usb.enrollment_label' "$resolved")"
+    fi
+}
+
+show_plan() {
+    resolve
+    print_plan
+}
+
+show_world_plan() {
+    resolve_world
+    print_plan
+}
+
+show_available() {
+    selected=$1
+    catalog_root=${DEVICE_MEDIA_CATALOG_DIR:-$monorepo_root/$(jq -r '.catalog.path' "$composition")}
+    index=$catalog_root/$(jq -r '.catalog.index' "$composition")
+    jq -r --argjson selected "$selected" '
+      .entries[] as $entry |
+      (if ($selected | index($entry.id)) then "[included] " else "[available] " end) + $entry.id
+    ' "$index"
+    if jq -e '.entries[] | select(.id == "dns-appliance")' "$resolved" >/dev/null; then
+        echo "[included] dns-appliance (World-local profile)"
+    else
+        echo "[available] dns-appliance (World-local profile)"
+    fi
+}
+
+command=${1:-help}
+case "$command" in
+    license)
+        shift
+        [ "${1:-}" = check ] || { usage >&2; exit 2; }
+        shift
+        exec "$repo_root/usb-media/check-license-policy" "$@"
+        ;;
+    available)
+        resolve
+        selected=$(jq -c '.entries' "$collection")
+        show_available "$selected"
+        ;;
+    targets)
+        exec "$repo_root/usb-media/inspect-targets"
+        ;;
+    include)
+        id=${2:-}
+        [ -n "$id" ] || fail "provide an entry ID to include"
+        resolve
+        catalog_root=${DEVICE_MEDIA_CATALOG_DIR:-$monorepo_root/$(jq -r '.catalog.path' "$composition")}
+        index=$catalog_root/$(jq -r '.catalog.index' "$composition")
+        jq -e --arg id "$id" '.entries[] | select(.id == $id)' "$index" >/dev/null ||
+            fail "entry is not in the catalog: $id"
+        temporary=$(mktemp)
+        jq --arg id "$id" '.entries = ((.entries + [$id]) | unique)' "$collection" > "$temporary"
+        mv "$temporary" "$collection"
+        echo "Included: $id"
+        ;;
+    exclude)
+        id=${2:-}
+        [ -n "$id" ] || fail "provide an entry ID to exclude"
+        temporary=$(mktemp)
+        jq --arg id "$id" '.entries = [.entries[] | select(. != $id)]' "$collection" > "$temporary"
+        mv "$temporary" "$collection"
+        echo "Excluded: $id"
+        ;;
+    plan)
+        show_plan
+        ;;
+    capacity|size)
+        shift
+        resolve
+        USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/calculate-capacity" "$@"
+        ;;
+    simulate)
+        echo "[1/4] Resolve the embedded catalog."
+        resolve
+        echo "[2/4] Combine selected entries and local profiles."
+        show_plan
+        echo
+        echo "[3/4] Image download and SHA-256 verification: skipped"
+        echo "[4/4] USB erase and burn: skipped"
+        echo
+        echo "Simulation complete: no network image or disk was changed."
+        ;;
+    prepare)
+        resolve
+        USB_MEDIA_CATALOG=$resolved "$repo_root/usb-media/fetch-images"
+        ;;
+    build-image)
+        shift
+        resolve
+        USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/build-image" "$@"
+        ;;
+    burn)
+        shift
+        resolve
+        USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/write-usb-linux" "$@"
+        ;;
+    burn-image-macos)
+        shift
+        resolve
+        USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/write-image-macos" "$@"
+        ;;
+    world)
+        shift
+        world_command=${1:-help}
+        case "$world_command" in
+            validate)
+                resolve_world_plan
+                echo "World contract: valid"
+                echo "Resolved World: $(jq -r '.world.slug' "$world_plan")"
+                echo "Selected media: $(jq -r '.media.id' "$world_plan")"
+                ;;
+            available)
+                resolve_world
+                selected=$(jq -c '.world.media.entries' "$resolved")
+                show_available "$selected"
+                ;;
+            plan)
+                show_world_plan
+                ;;
+            capacity|size)
+                shift
+                resolve_world
+                USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/calculate-capacity" "$@"
+                ;;
+            simulate)
+                echo "[1/4] Validate and resolve the World."
+                resolve_world
+                echo "[2/4] Resolve World-selected Catalog and local entries."
+                print_plan
+                echo
+                echo "[3/4] Image download and SHA-256 verification: skipped"
+                echo "[4/4] USB erase and burn: skipped"
+                echo
+                echo "Simulation complete: no network image or disk was changed."
+                ;;
+            readiness)
+                exec "$repo_root/dns-image/check-readiness"
+                ;;
+            prepare)
+                resolve_world
+                USB_MEDIA_CATALOG=$resolved "$repo_root/usb-media/fetch-images"
+                ;;
+            build-image)
+                shift
+                resolve_world
+                USB_MEDIA_CATALOG=$resolved exec "$repo_root/usb-media/build-image" "$@"
+                ;;
+            burn)
+                shift
+                resolve_world
+                target_device=$(option_value --device "$@") || fail "world burn requires --device"
+                USB_MEDIA_CATALOG=$resolved exec "$event_recorder" \
+                    --world-plan "$world_plan" \
+                    --catalog "$resolved" \
+                    --writer linux-ventoy \
+                    --device "$target_device" \
+                    -- "$repo_root/usb-media/write-usb-linux" "$@"
+                ;;
+            burn-image-macos)
+                shift
+                resolve_world
+                target_device=$(option_value --device "$@") || fail "world burn-image-macos requires --device"
+                USB_MEDIA_CATALOG=$resolved exec "$event_recorder" \
+                    --world-plan "$world_plan" \
+                    --catalog "$resolved" \
+                    --writer macos-mbr-last \
+                    --device "$target_device" \
+                    -- "$repo_root/usb-media/write-image-macos" "$@"
+                ;;
+            help|-h|--help)
+                usage
+                ;;
+            *)
+                usage >&2
+                exit 2
+                ;;
+        esac
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac

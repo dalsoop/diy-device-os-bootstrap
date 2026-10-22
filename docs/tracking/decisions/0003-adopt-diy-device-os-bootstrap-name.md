@@ -30,6 +30,12 @@ spellings. The prior `world write`, `write`, and `write-image-macos` spellings
 remain compatibility aliases. Internal writer filenames stay unchanged so this
 naming change does not disturb their reviewed safety implementation.
 
+## Alternatives
+
+- `gujo-homelab-device-bootstrap` was rejected because it omitted the defining OS role and tied reusable tooling to one homelab brand.
+- A USB-only name was rejected because the repository also owns World intent, Catalog resolution, image construction, and installation evidence.
+- A playbook-only name was rejected because it hid the physical burner and guarded Installer responsibility.
+
 ## Consequences
 
 Repository URLs, badges, schema identifiers, composition metadata, SBOM
@@ -40,3 +46,6 @@ and clones should migrate to the new URL and directory name.
 The burner terminology changes the human interface only. Every destructive
 path retains live removable-device checks, root-disk exclusion, readable serial,
 capacity validation, and the exact target-specific `ERASE` confirmation.
+
+The old command aliases are removed. The `device-os` command, `burn`
+terminology, and safety model are the only operator surface.

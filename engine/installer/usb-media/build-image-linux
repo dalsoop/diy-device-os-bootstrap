@@ -1,0 +1,190 @@
+#!/bin/bash
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+set -euo pipefail
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+catalog=${USB_MEDIA_CATALOG:-$repo_root/work/device-os/catalog.json}
+writer=${DEVICE_OS_IMAGE_WRITER:-$script_dir/write-usb-linux}
+license_checker=${DEVICE_OS_LICENSE_CHECKER:-$script_dir/check-license-policy}
+distribution_policy=$script_dir/distribution-policy.json
+distribution_renderer=$script_dir/render-distribution-record
+output=
+size=
+declare -a runtime_args=()
+
+usage() {
+    cat >&2 <<EOF
+usage: sudo $0 --output /absolute/path/device-os.raw --size EXACT_BYTES \\
+  [--catalog PATH] \\
+  [--runtime-artifact id=/absolute/path] \\
+  [--runtime-manifest id=/absolute/path]
+
+Creates a new exact-size MBR raw image through an isolated loop device.
+The output path must not already exist. This command never opens a physical disk.
+EOF
+    exit 2
+}
+
+fail() {
+    echo "usb-media build-image-linux: $*" >&2
+    exit 1
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --output) output=${2:-}; shift 2 ;;
+        --size) size=${2:-}; shift 2 ;;
+        --catalog) catalog=${2:-}; shift 2 ;;
+        --runtime-artifact|--runtime-manifest)
+            runtime_args+=("$1" "${2:-}")
+            shift 2
+            ;;
+        *) usage ;;
+    esac
+done
+
+[ "$(uname -s)" = Linux ] || fail "Linux is required"
+[ "$(id -u)" -eq 0 ] || fail "run as root"
+for command in losetup truncate sha256sum blockdev jq; do
+    command -v "$command" >/dev/null 2>&1 || fail "$command is required"
+done
+[[ "$output" = /* ]] || fail "--output must be an absolute path"
+case "$size" in
+    ''|*[!0-9]*) fail "--size must be an exact byte count" ;;
+esac
+[ "$size" -ge 4294967296 ] || fail "raw image must be at least 4 GiB"
+[ -d "$(dirname -- "$output")" ] || fail "output directory does not exist"
+[ ! -e "$output" ] || fail "output already exists: $output"
+[ ! -e "$output.sha256" ] || fail "checksum already exists: $output.sha256"
+[ ! -e "$output.manifest.json" ] || fail "image manifest already exists: $output.manifest.json"
+[ -r "$catalog" ] || fail "resolved catalog is missing: $catalog"
+[ -x "$license_checker" ] || fail "license policy checker is unavailable"
+[ -x "$distribution_renderer" ] || fail "distribution record renderer is unavailable"
+
+license_decision=$(mktemp)
+license_record=$(mktemp)
+trap 'rm -f "$license_decision" "$license_record"' EXIT HUP INT TERM
+if ! DEVICE_OS_DISTRIBUTION_POLICY=$distribution_policy USB_MEDIA_CATALOG=$catalog \
+    "$license_checker" --mode personal-use --json > "$license_decision"; then
+    rm -f "$license_decision"
+    fail "personal-use license policy denied raw image creation"
+fi
+"$distribution_renderer" "$license_decision" "$distribution_policy" > "$license_record" ||
+    fail "personal-use license decision is malformed"
+jq -e '.mode == "personal-use" and .decision == "allow"' "$license_record" >/dev/null ||
+    fail "personal-use license policy denied raw image creation"
+distribution_policy_sha256=$(sha256sum "$distribution_policy" | awk 'NR == 1 {print $1}')
+
+if [ "${DEVICE_OS_SKIP_LOOP_NODE_SETUP:-0}" != 1 ] &&
+    [ -c /dev/loop-control ] && [ ! -b /dev/loop0 ]; then
+    command -v mknod >/dev/null 2>&1 || fail "mknod is required"
+    command -v seq >/dev/null 2>&1 || fail "seq is required"
+    for number in $(seq 0 31); do
+        [ -e "/dev/loop$number" ] || mknod "/dev/loop$number" b 7 "$number"
+    done
+fi
+
+output_dir=$(CDPATH='' cd -- "$(dirname -- "$output")" && pwd)
+output_name=$(basename -- "$output")
+temporary=$output_dir/.$output_name.partial.$$
+checksum_temporary=$output_dir/.$output_name.sha256.partial.$$
+manifest_temporary=$output_dir/.$output_name.manifest.json.partial.$$
+loop_device=
+
+cleanup() {
+    if [ -n "$loop_device" ]; then
+        losetup -d "$loop_device" 2>/dev/null || true
+    fi
+    rm -f "$temporary"
+    rm -f "$checksum_temporary"
+    rm -f "$manifest_temporary"
+    rm -f "$license_decision"
+    rm -f "$license_record"
+}
+trap cleanup EXIT HUP INT TERM
+
+truncate -s "$size" "$temporary"
+loop_device=$(losetup --find --show --partscan "$temporary")
+[ "$(lsblk -dnro TYPE "$loop_device")" = loop ] ||
+    fail "losetup did not return a loop device"
+[ "$(blockdev --getsize64 "$loop_device")" = "$size" ] ||
+    fail "loop device size differs from the requested image size"
+
+if [ "${#runtime_args[@]}" -gt 0 ]; then
+    DEVICE_OS_INTERNAL_IMAGE_BUILD=1 \
+    DEVICE_OS_LICENSE_DECISION_OUTPUT=$license_decision \
+    USB_MEDIA_CATALOG=$catalog \
+        "$writer" \
+            --device "$loop_device" \
+            --catalog "$catalog" \
+            --image-build \
+            "${runtime_args[@]}"
+else
+    DEVICE_OS_INTERNAL_IMAGE_BUILD=1 \
+    DEVICE_OS_LICENSE_DECISION_OUTPUT=$license_decision \
+    USB_MEDIA_CATALOG=$catalog \
+        "$writer" \
+            --device "$loop_device" \
+            --catalog "$catalog" \
+            --image-build
+fi
+
+"$distribution_renderer" "$license_decision" "$distribution_policy" > "$license_record" ||
+    fail "image writer returned a malformed enriched license decision"
+jq -e '.mode == "personal-use" and .decision == "allow"' "$license_record" >/dev/null ||
+    fail "image writer returned a denied enriched license decision"
+
+blockdev --flushbufs "$loop_device"
+losetup -d "$loop_device"
+loop_device=
+actual_size=$(stat -c %s "$temporary")
+[ "$actual_size" = "$size" ] || fail "generated image size changed unexpectedly"
+image_digest=$(sha256sum "$temporary" | awk 'NR == 1 { print $1 }')
+[[ "$image_digest" =~ ^[a-f0-9]{64}$ ]] || fail "generated image checksum is invalid"
+catalog_digest=$(sha256sum "$catalog" | awk 'NR == 1 { print $1 }')
+[[ "$catalog_digest" =~ ^[a-f0-9]{64}$ ]] || fail "resolved catalog checksum is invalid"
+catalog_revision=$(jq -er '.catalog.revision | select(test("^[a-f0-9]{40}$"))' "$catalog")
+catalog_tree=$(jq -er '.catalog.tree | select(test("^[a-f0-9]{40}$"))' "$catalog")
+world_binding=$(jq -c '
+  if has("world") then
+    {slug: .world.world.slug, media_id: .world.media.id}
+  else
+    null
+  end
+' "$catalog")
+printf '%s  %s\n' "$image_digest" "$output_name" > "$checksum_temporary"
+jq -n \
+    --arg filename "$output_name" \
+    --argjson bytes "$size" \
+    --arg image_sha256 "$image_digest" \
+    --arg catalog_sha256 "$catalog_digest" \
+    --arg revision "$catalog_revision" \
+    --arg tree "$catalog_tree" \
+    --argjson world "$world_binding" \
+    --arg distribution_policy_sha256 "$distribution_policy_sha256" \
+    --slurpfile license_decision "$license_decision" \
+    '{
+      schema_version: 2,
+      kind: "device-os-raw-image",
+      image: {filename: $filename, bytes: $bytes, sha256: $image_sha256},
+      catalog: {sha256: $catalog_sha256, revision: $revision, tree: $tree},
+      license: {
+        mode: $license_decision[0].mode,
+        decision: $license_decision[0].decision,
+        distribution_policy_sha256: $distribution_policy_sha256,
+        selected_artifacts: $license_decision[0].selected_artifacts
+      },
+      world: $world
+    }' > "$manifest_temporary"
+mv "$temporary" "$output"
+mv "$checksum_temporary" "$output.sha256"
+mv "$manifest_temporary" "$output.manifest.json"
+rm -f "$license_decision"
+rm -f "$license_record"
+trap - EXIT HUP INT TERM
+
+echo "usb-media build-image-linux: created $output"
+echo "usb-media build-image-linux: checksum $output.sha256"
+echo "usb-media build-image-linux: manifest $output.manifest.json"

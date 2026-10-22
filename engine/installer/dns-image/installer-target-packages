@@ -1,0 +1,95 @@
+# SPDX-FileCopyrightText: 2026 dalsoop
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Packages that debian-installer itself installs onto the target disk of an
+# amd64 appliance (BIOS and UEFI), independently of simple-cdd's dns.packages.
+# build-image fails, deletes the ISO and writes no manifest when any package
+# listed here or in dns.packages is absent from the offline DVD package list
+# (dns-image/check-installer-closure via dns-image/gate-built-iso).
+#
+# Derived by reading the installer components shipped in the Debian 13.7
+# guided DVD (pool/main/*/*.udeb and install.amd/initrd.gz): every
+# `apt-install` call on the path taken by default.preseed. Versions read:
+# base-installer/bootstrap-base 1.226, grub-installer 1.212, partman-ext3 119,
+# partman-basicfilesystems 174, localechooser and hw-detect from the initrd,
+# user-setup-udeb 1.107, pkgsel 0.85. Recheck this list whenever the pinned
+# Debian point release or debian-installer snapshot changes.
+#
+# Format: one Debian binary package name per line; '#' starts a comment.
+# debian-cd adds the Depends closure of every package on the DVD, so only the
+# names the installer requests (plus the Secure Boot chain it relies on) are
+# listed here.
+
+# base-installer: usr/lib/base-installer/library.sh install_kernel_linux.
+# Each failure is exit_error base-installer/kernel/failed-package-install.
+busybox
+zstd
+initramfs-tools
+# bootstrap-base: usr/lib/base-installer/kernel.sh arch_get_kernel on amd64;
+# a failed install is exit_error base-installer/kernel/failed-install.
+linux-image-amd64
+
+# grub-installer: grub_probe always runs `apt-install grub-common` first.
+grub-common
+# grub-installer: amd64 without UEFI (or partman ignore_uefi) selects grub-pc.
+# A failed install is grub-installer/apt-install-failed.
+grub-pc
+# grub-installer: amd64/efi with fw_platform_size 64 selects grub-efi-amd64.
+grub-efi-amd64
+# grub-installer: after grub-efi-amd64* it runs
+# `apt-install --allow-remove shim-signed || true`. Without it Secure Boot
+# machines cannot boot the target, so its absence is treated as a failure.
+shim-signed
+# Secure Boot chain installed with shim-signed: the signed GRUB image
+# (Recommends of grub-efi-amd64-bin and shim-signed), the signed shim helpers
+# and mokutil (Depends of shim-signed and shim-signed-common).
+grub-efi-amd64-signed
+shim-helpers-amd64-signed
+mokutil
+# grub-installer reads the firmware boot entries with `efibootmgr -v` after
+# installing; Recommends of grub-efi-amd64-bin.
+efibootmgr
+
+# partman-ext3 lib/partman/finish.d/70aptinstall_ext3: the atomic recipe
+# creates an ext4 root filesystem.
+e2fsprogs
+# partman-basicfilesystems lib/partman/finish.d/70aptinstall_basicfilesystems:
+# the UEFI EFI system partition is FAT, so the target needs fsck.vfat.
+dosfstools
+
+# localechooser post-base-installer.d/05localechooser: the ko_KR.UTF-8 locale.
+locales
+# console-setup-udeb base-installer.d/20console-setup when a keyboard exists.
+keyboard-configuration
+console-setup
+
+# hw-detect: udev always; pciutils with a PCI bus; usbutils with a USB bus;
+# eject when list-devices reports a CD or maybe-usb-floppy device.
+udev
+pciutils
+usbutils
+eject
+# finish-install.d/08hw-detect installs the CPU vendor's microcode package that
+# post-base-installer.d/50install-firmware queued in /tmp/microcode.list
+# (non-free-firmware).
+intel-microcode
+amd64-microcode
+
+# user-setup-apply: passwd/root-login is false, so sudo is installed.
+sudo
+
+# pkgsel postinst: `apt-install tasksel` without `|| true` under `set -e`.
+tasksel
+
+# Not listed (not on this appliance's install path, or best-effort extras
+# whose absence leaves a working appliance):
+# - os-prober (grub-installer, `|| true`; grub-installer/only_debian is true)
+# - installation-report (save-logs), laptop-detect and unattended-upgrades
+#   (pkgsel; pkgsel/update-policy defaults to none), popularity-contest
+#   (declined in default.preseed)
+# - ca-certificates (apt-setup, only for HTTPS mirrors; dns.packages has it)
+# - virtual-machine guest tools from 08hw-detect, hardware firmware from
+#   50install-firmware, pcmciautils, pbbuttonsd, opal-prd, libfribidi0
+# - lvm2, mdadm, cryptsetup, btrfs-progs, xfsprogs, jfsutils, nbd-client,
+#   open-iscsi, multipath-tools-boot, ppp, espeakup, brltty, mouseemu, compiz,
+#   systemd-boot, depthcharge-tools, mkvmlinuz, u-boot-efi-dtb

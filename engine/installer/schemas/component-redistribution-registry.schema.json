@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dalsoop/diy-device-os-bootstrap/blob/main/engine/installer/schemas/component-redistribution-registry.schema.json",
+  "title": "DNS composite-image component redistribution registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_id", "components"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "artifact_id": { "const": "dns-appliance" },
+    "components": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "prefixItems": [
+        { "$ref": "#/$defs/debianClosure" },
+        { "$ref": "#/$defs/technitiumOCI" },
+        { "$ref": "#/$defs/tailscaleArchive" },
+        { "$ref": "#/$defs/tailscaleDependencyReport" },
+        { "$ref": "#/$defs/repositorySourceSnapshot" }
+      ],
+      "items": false
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "safeRelativePath": { "type": "string", "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9](?:[A-Za-z0-9._+!/-]*[A-Za-z0-9._+!-])?$" },
+    "digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "value"],
+      "properties": {
+        "algorithm": { "const": "sha256" },
+        "value": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "sourceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "const": "oci-digest" },
+        "value": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "url"],
+        "properties": {
+          "kind": { "enum": ["license", "notices", "corresponding-source", "trademark"] },
+          "url": { "type": "string", "pattern": "^https://" }
+        }
+      },
+      "allOf": [
+        { "contains": { "properties": { "kind": { "const": "license" } }, "required": ["kind"] } },
+        { "contains": { "properties": { "kind": { "const": "notices" } }, "required": ["kind"] } },
+        { "contains": { "properties": { "kind": { "const": "corresponding-source" } }, "required": ["kind"] } },
+        { "contains": { "properties": { "kind": { "const": "trademark" } }, "required": ["kind"] } }
+      ]
+    },
+    "obligations": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/obligation" },
+      "allOf": [
+        { "contains": { "properties": { "kind": { "const": "license-text" } }, "required": ["kind"] } },
+        { "contains": { "properties": { "kind": { "const": "notices" } }, "required": ["kind"] } },
+        { "contains": { "properties": { "kind": { "const": "corresponding-source" } }, "required": ["kind"] } },
+        { "contains": { "properties": { "kind": { "const": "trademark" } }, "required": ["kind"] } }
+      ]
+    },
+    "obligation": { "oneOf": [{ "$ref": "#/$defs/embeddedObligation" }, { "$ref": "#/$defs/bundleObligation" }, { "$ref": "#/$defs/notRequiredObligation" }] },
+    "obligationKind": { "enum": ["license-text", "notices", "corresponding-source", "trademark"] },
+    "embeddedObligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "disposition", "location"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/obligationKind" },
+        "disposition": { "const": "embedded-artifact" },
+        "location": { "$ref": "#/$defs/artifactLocation" }
+      }
+    },
+    "bundleObligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "disposition", "location"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/obligationKind" },
+        "disposition": { "const": "bundle-file" },
+        "location": { "$ref": "#/$defs/bundleLocation" }
+      }
+    },
+    "notRequiredObligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "disposition"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/obligationKind" },
+        "disposition": { "const": "not-required" }
+      }
+    },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "path", "sha256"],
+      "properties": {
+        "scope": { "enum": ["artifact", "release-bundle"] },
+        "path": { "$ref": "#/$defs/safeRelativePath" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "artifactLocation": { "allOf": [{ "$ref": "#/$defs/location" }, { "properties": { "scope": { "const": "artifact" } } }] },
+    "bundleLocation": { "allOf": [{ "$ref": "#/$defs/location" }, { "properties": { "scope": { "const": "release-bundle" } } }] },
+    "personalRedistribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": { "status": { "const": "personal-use-only" } }
+    },
+    "reviewedRedistribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "status", "component_id", "component_version", "artifact_sha256", "reviewed_at", "reviewer", "evidence", "obligations"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "status": { "const": "redistribution-reviewed" },
+        "component_id": { "enum": ["debian-package-closure", "technitium-oci", "tailscale-archive", "tailscale-dependency-report", "repository-source-snapshot"] },
+        "component_version": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "$ref": "#/$defs/sha256" },
+        "source_identity": { "$ref": "#/$defs/sourceIdentity" },
+        "reviewed_at": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "reviewer": { "type": "string", "minLength": 1 },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "obligations": { "$ref": "#/$defs/obligations" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "component_id": { "const": "technitium-oci" } }, "required": ["component_id"] },
+          "then": { "required": ["source_identity"] },
+          "else": { "not": { "required": ["source_identity"] } }
+        }
+      ]
+    },
+    "redistribution": {
+      "oneOf": [
+        { "$ref": "#/$defs/personalRedistribution" },
+        { "$ref": "#/$defs/reviewedRedistribution" }
+      ]
+    },
+    "ordinaryComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "digest", "redistribution"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "string", "minLength": 1 },
+        "digest": { "$ref": "#/$defs/digest" },
+        "redistribution": { "$ref": "#/$defs/redistribution" }
+      }
+    },
+    "debianClosure": { "allOf": [{ "$ref": "#/$defs/ordinaryComponent" }, { "properties": { "id": { "const": "debian-package-closure" } } }] },
+    "technitiumOCI": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "digest", "source_identity", "redistribution"],
+      "properties": {
+        "id": { "const": "technitium-oci" },
+        "version": { "type": "string", "minLength": 1 },
+        "digest": { "$ref": "#/$defs/digest" },
+        "source_identity": { "$ref": "#/$defs/sourceIdentity" },
+        "redistribution": { "$ref": "#/$defs/redistribution" }
+      }
+    },
+    "tailscaleArchive": { "allOf": [{ "$ref": "#/$defs/ordinaryComponent" }, { "properties": { "id": { "const": "tailscale-archive" } } }] },
+    "tailscaleDependencyReport": { "allOf": [{ "$ref": "#/$defs/ordinaryComponent" }, { "properties": { "id": { "const": "tailscale-dependency-report" } } }] },
+    "repositorySourceSnapshot": { "allOf": [{ "$ref": "#/$defs/ordinaryComponent" }, { "properties": { "id": { "const": "repository-source-snapshot" } } }] }
+  }
+}
